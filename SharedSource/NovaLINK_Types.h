@@ -35,6 +35,7 @@
 #pragma mark Project URLs
 
 static const char* const kNovaLINKProjectURL = "https://github.com/thenurim/novalink_macos_driver_audio";
+static const char* const kNovaLINKWebsiteURL = "https://novalink.thenurim.life";
 static const char* const kNovaLINKIssueTrackerURL = "https://github.com/thenurim/novalink_macos_driver_audio/issues";
 static const char* const kNovaLINKContributorsURL = "https://github.com/thenurim/novalink_macos_driver_audio/issues/contributors";
 

@@ -81,13 +81,39 @@ static NSInteger const kContributorsLabelTag = 4;
             versionLabel.stringValue = [NSString stringWithFormat:@"Version %@", version];
         }
         
-        // Copyright notice label
+        // Copyright notice label — "NovaLINK" links to the product website.
         NSString* __nullable copyrightNotice =
             [[bundle infoDictionary] objectForKey:@"NSHumanReadableCopyright"];
         
         if (copyrightNotice) {
+            copyrightLabel.selectable = YES;
+            copyrightLabel.allowsEditingTextAttributes = YES;
             copyrightLabel.alignment = NSTextAlignmentCenter;
-            copyrightLabel.stringValue = (NSString*)copyrightNotice;
+            
+            NSString* notice = (NSString*)copyrightNotice;
+            NSFont* copyrightFont = copyrightLabel.font ? copyrightLabel.font : [NSFont labelFontOfSize:0.0];
+            NSMutableParagraphStyle* copyrightCentered = [[NSMutableParagraphStyle alloc] init];
+            copyrightCentered.alignment = NSTextAlignmentCenter;
+            
+            NSMutableAttributedString* attributedCopyright =
+                [[NSMutableAttributedString alloc] initWithString:notice
+                                                       attributes:@{ NSFontAttributeName: copyrightFont,
+                                                                     NSParagraphStyleAttributeName: copyrightCentered,
+                                                                     NSForegroundColorAttributeName: NSColor.labelColor }];
+            
+            NSRange novalinkRange = [notice rangeOfString:@"NovaLINK"];
+            if (novalinkRange.location != NSNotFound) {
+                NSString* websiteURL = [NSString stringWithUTF8String:kNovaLINKWebsiteURL];
+                [attributedCopyright addAttributes:@{ NSLinkAttributeName: websiteURL,
+                                                      NSForegroundColorAttributeName:
+                                                          [NSColor colorWithCalibratedRed:0.2
+                                                                                    green:0.4
+                                                                                     blue:0.6
+                                                                                    alpha:1.0] }
+                                             range:novalinkRange];
+            }
+            
+            copyrightLabel.attributedStringValue = attributedCopyright;
         }
         
         // Project website link label
