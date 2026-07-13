@@ -1171,7 +1171,7 @@ void	NovaLINK_Device::Device_SetPropertyData(AudioObjectID inObjectID, pid_t inC
 
 void	NovaLINK_Device::StartIO(UInt32 inClientID)
 {
-    bool clientIsNovaLINKApp, bgmAppHasClientRegistered;
+    bool clientIsNovaLINKApp, novaLINKAppHasClientRegistered;
     
     {
         CAMutex::Locker theStateLocker(mStateMutex);
@@ -1199,13 +1199,13 @@ void	NovaLINK_Device::StartIO(UInt32 inClientID)
         }
         
         clientIsNovaLINKApp = mClients.IsNovaLINKApp(inClientID);
-        bgmAppHasClientRegistered = mClients.NovaLINKAppHasClientRegistered();
+        novaLINKAppHasClientRegistered = mClients.NovaLINKAppHasClientRegistered();
     }
     
     // We only return from StartIO after NovaLINKApp is ready to pass the audio through to the output device. That way
     // the HAL doesn't start sending us data before NovaLINKApp can play it, which would mean we'd have to either drop
     // frames or increase latency.
-    if(!clientIsNovaLINKApp && bgmAppHasClientRegistered)
+    if(!clientIsNovaLINKApp && novaLINKAppHasClientRegistered)
     {
         DebugMsg("NovaLINK_Device::StartIO: StartNovaLINKAppPlayThroughSync.");
         UInt64 theXPCError = StartNovaLINKAppPlayThroughSync(GetObjectID() == kObjectID_Device_UI_Sounds);

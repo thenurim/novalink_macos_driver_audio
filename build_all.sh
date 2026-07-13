@@ -18,8 +18,8 @@ xcodebuild -project "${ROOT}/NovaLinkAudioDriver/NovaLINKDriver.xcodeproj" \
   build
 
 echo "==> Building NovaLINK passthrough app (${CONFIG})"
-xcodebuild -project "${ROOT}/BGMApp/BGMApp.xcodeproj" \
-  -scheme "Background Music" \
+xcodebuild -project "${ROOT}/NovaLINKApp/NovaLINKApp.xcodeproj" \
+  -scheme "NovaLINK" \
   -configuration "${CONFIG}" \
   -derivedDataPath "${ROOT}/build/DerivedData-App" \
   CODE_SIGN_IDENTITY="-" \
@@ -30,8 +30,8 @@ xcodebuild -project "${ROOT}/BGMApp/BGMApp.xcodeproj" \
   build
 
 echo "==> Building NovaLINKXPCHelper (${CONFIG})"
-xcodebuild -project "${ROOT}/BGMApp/BGMApp.xcodeproj" \
-  -scheme BGMXPCHelper \
+xcodebuild -project "${ROOT}/NovaLINKApp/NovaLINKApp.xcodeproj" \
+  -scheme NovaLINKXPCHelper \
   -configuration "${CONFIG}" \
   -derivedDataPath "${ROOT}/build/DerivedData-App" \
   CODE_SIGN_IDENTITY="-" \
@@ -56,7 +56,7 @@ cp -R "${ROOT}/build/DerivedData-App/Build/Products/${CONFIG}/NovaLINKXPCHelper.
 # Bind Info.plist + entitlements so TCC microphone grants stick (linker-signed
 # binaries leave Info.plist unbound and re-prompt on every launch / relaunch).
 PASSTHROUGH_APP="${OUT_DIR}/NovaLINK Audio Passthrough.app"
-ENTITLEMENTS="${ROOT}/BGMApp/BGMApp/BGMApp.entitlements"
+ENTITLEMENTS="${ROOT}/NovaLINKApp/NovaLINKApp/NovaLINKApp.entitlements"
 echo "==> Ad-hoc codesign passthrough app (stable identifier + entitlements)"
 codesign --force --deep --sign - \
   --identifier "life.thenurim.novalink.App" \
