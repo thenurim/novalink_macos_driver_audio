@@ -34,9 +34,9 @@
 
 #pragma mark Project URLs
 
-static const char* const kNovaLINKProjectURL = "https://github.com/kyleneideck/BackgroundMusic";
-static const char* const kNovaLINKIssueTrackerURL = "https://github.com/kyleneideck/BackgroundMusic/issues";
-static const char* const kNovaLINKContributorsURL = "https://github.com/kyleneideck/BackgroundMusic/graphs/contributors";
+static const char* const kNovaLINKProjectURL = "https://github.com/thenurim/novalink_macos_driver_audio";
+static const char* const kNovaLINKIssueTrackerURL = "https://github.com/thenurim/novalink_macos_driver_audio/issues";
+static const char* const kNovaLINKContributorsURL = "https://github.com/thenurim/novalink_macos_driver_audio/issues/contributors";
 
 #pragma mark IDs
 
@@ -112,13 +112,6 @@ enum
     // A CFBoolean similar to kAudioDevicePropertyDeviceIsRunning except it ignores whether IO is running for
     // NovaLINKApp. This is so NovaLINKApp knows when it can stop doing IO to save CPU.
     kAudioDeviceCustomPropertyDeviceIsRunningSomewhereOtherThanNovaLINKApp = 'runo',
-    // A CFArray of CFDictionaries that each contain an app's pid, bundle ID and volume relative to other
-    // running apps. See the dictionary keys below for more info.
-    //
-    // Getting this property will only return apps with volumes other than the default. Setting this property
-    // will add new app volumes or replace existing ones, but there's currently no way to delete an app from
-    // the internal collection.
-    kAudioDeviceCustomPropertyAppVolumes                              = 'apvs',
     // A CFArray of CFBooleans indicating which of NovaLINKDevice's controls are enabled. All controls are enabled
     // by default. This property is settable. See the array indices below for more info.
     kAudioDeviceCustomPropertyEnabledOutputControls                   = 'bgct'
@@ -138,33 +131,6 @@ enum NovaLINKDeviceAudibleState : SInt32
     kNovaLINKDeviceIsSilentExceptMusic   = 'olym',
     kNovaLINKDeviceIsAudible             = 'audi'
 };
-
-// kAudioDeviceCustomPropertyAppVolumes keys
-//
-// A CFNumber<SInt32> between kAppRelativeVolumeMinRawValue and kAppRelativeVolumeMaxRawValue. A value greater than
-// the midpoint increases the client's volume and a value less than the midpoint decreases it. A volume curve is
-// applied to kNovaLINKAppVolumesKey_RelativeVolume when it's first set and then each of the app's samples are multiplied
-// by it.
-#define kNovaLINKAppVolumesKey_RelativeVolume    "rvol"
-// A CFNumber<SInt32> between kAppPanLeftRawValue and kAppPanRightRawValue. A negative value has a higher proportion
-// of left channel, and a positive value has a higher proportion of right channel.
-#define kNovaLINKAppVolumesKey_PanPosition       "ppos"
-// The app's pid as a CFNumber. May be omitted if kNovaLINKAppVolumesKey_BundleID is present.
-#define kNovaLINKAppVolumesKey_ProcessID         "pid"
-// The app's bundle ID as a CFString. May be omitted if kNovaLINKAppVolumesKey_ProcessID is present.
-#define kNovaLINKAppVolumesKey_BundleID          "bid"
-
-// Volume curve range for app volumes
-#define kAppRelativeVolumeMaxRawValue   100
-#define kAppRelativeVolumeMinRawValue   0
-#define kAppRelativeVolumeMinDbValue    -96.0f
-#define kAppRelativeVolumeMaxDbValue	0.0f
-
-// Pan position values
-#define kAppPanLeftRawValue   -100
-#define kAppPanCenterRawValue 0
-#define kAppPanRightRawValue  100
-#define kAppPanNoValue INT_MIN
 
 // kAudioDeviceCustomPropertyEnabledOutputControls indices
 enum
@@ -203,12 +169,6 @@ static const AudioObjectPropertyAddress kNovaLINKRunningSomewhereOtherThanNovaLI
     kAudioObjectPropertyElementMaster
 };
 
-static const AudioObjectPropertyAddress kNovaLINKAppVolumesAddress = {
-    kAudioDeviceCustomPropertyAppVolumes,
-    kAudioObjectPropertyScopeGlobal,
-    kAudioObjectPropertyElementMaster
-};
-
 static const AudioObjectPropertyAddress kNovaLINKEnabledOutputControlsAddress = {
     kAudioDeviceCustomPropertyEnabledOutputControls,
     kAudioObjectPropertyScopeOutput,
@@ -239,16 +199,6 @@ public:
 class NovaLINK_InvalidClientPIDException : public std::runtime_error {
 public:
     NovaLINK_InvalidClientPIDException() : std::runtime_error("InvalidClientPID") { }
-};
-
-class NovaLINK_InvalidClientRelativeVolumeException : public std::runtime_error {
-public:
-    NovaLINK_InvalidClientRelativeVolumeException() : std::runtime_error("InvalidClientRelativeVolume") { }
-};
-
-class NovaLINK_InvalidClientPanPositionException : public std::runtime_error {
-public:
-    NovaLINK_InvalidClientPanPositionException() : std::runtime_error("InvalidClientPanPosition") { }
 };
 
 class NovaLINK_DeviceNotSetException : public std::runtime_error {

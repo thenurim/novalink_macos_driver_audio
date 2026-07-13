@@ -30,7 +30,6 @@
 
 // PublicUtility Includes
 #include "CAException.h"
-#include "CACFDictionary.h"
 #include "CADispatchQueue.h"
 
 
@@ -41,10 +40,6 @@ NovaLINK_Clients::NovaLINK_Clients(AudioObjectID inOwnerDeviceID, NovaLINK_TaskQ
     mOwnerDeviceID(inOwnerDeviceID),
     mClientMap(inTaskQueue)
 {
-    mRelativeVolumeCurve.AddRange(kAppRelativeVolumeMinRawValue,
-                                  kAppRelativeVolumeMaxRawValue,
-                                  kAppRelativeVolumeMinDbValue,
-                                  kAppRelativeVolumeMaxDbValue);
 }
 
 #pragma mark Add/Remove Clients
@@ -292,110 +287,5 @@ bool    NovaLINK_Clients::IsMusicPlayerRT(const UInt32 inClientID) const
     NovaLINK_Client theClient;
     bool didGetClient = mClientMap.GetClientRT(inClientID, &theClient);
     return didGetClient && theClient.mIsMusicPlayer;
-}
-
-#pragma mark App Volumes
-
-Float32 NovaLINK_Clients::GetClientRelativeVolumeRT(UInt32 inClientID) const
-{
-    NovaLINK_Client theClient;
-    bool didGetClient = mClientMap.GetClientRT(inClientID, &theClient);
-    return (didGetClient ? theClient.mRelativeVolume : 1.0f);
-}
-
-SInt32 NovaLINK_Clients::GetClientPanPositionRT(UInt32 inClientID) const
-{
-    NovaLINK_Client theClient;
-    bool didGetClient = mClientMap.GetClientRT(inClientID, &theClient);
-    return (didGetClient ? theClient.mPanPosition : kAppPanCenterRawValue);
-}
-
-bool    NovaLINK_Clients::SetClientsRelativeVolumes(const CACFArray inAppVolumes)
-{
-    bool didChangeAppVolumes = false;
-    
-    // Each element in appVolumes is a CFDictionary containing the process id and/or bundle id of an app, and its
-    // new relative volume
-    for(UInt32 i = 0; i < inAppVolumes.GetNumberItems(); i++)
-    {
-        CACFDictionary theAppVolume(false);
-        inAppVolumes.GetCACFDictionary(i, theAppVolume);
-        
-        // Get the app's PID from the dict
-        pid_t theAppPID;
-        bool didFindPID = theAppVolume.GetSInt32(CFSTR(kNovaLINKAppVolumesKey_ProcessID), theAppPID);
-        
-        // Get the app's bundle ID from the dict
-        CACFString theAppBundleID;
-        theAppBundleID.DontAllowRelease();
-        theAppVolume.GetCACFString(CFSTR(kNovaLINKAppVolumesKey_BundleID), theAppBundleID);
-        
-        ThrowIf(!didFindPID && !theAppBundleID.IsValid(),
-                NovaLINK_InvalidClientRelativeVolumeException(),
-                "NovaLINK_Clients::SetClientsRelativeVolumes: App volume was sent without PID or bundle ID for app");
-        
-        bool didGetVolume;
-        {
-            SInt32 theRawRelativeVolume;
-            didGetVolume = theAppVolume.GetSInt32(CFSTR(kNovaLINKAppVolumesKey_RelativeVolume), theRawRelativeVolume);
-            
-            if (didGetVolume) {
-                ThrowIf(didGetVolume && (theRawRelativeVolume < kAppRelativeVolumeMinRawValue || theRawRelativeVolume > kAppRelativeVolumeMaxRawValue),
-                        NovaLINK_InvalidClientRelativeVolumeException(),
-                        "NovaLINK_Clients::SetClientsRelativeVolumes: Relative volume for app out of valid range");
-                
-                // Apply the volume curve to the raw volume
-                //
-                // mRelativeVolumeCurve uses the default kPow2Over1Curve transfer function, so we also multiply by 4 to
-                // keep the middle volume equal to 1 (meaning apps' volumes are unchanged by default).
-                Float32 theRelativeVolume = mRelativeVolumeCurve.ConvertRawToScalar(theRawRelativeVolume) * 4;
-
-                // Try to update the client's volume, first by PID and then by bundle ID. Always try
-                // both because apps can have multiple clients.
-                if(mClientMap.SetClientsRelativeVolume(theAppPID, theRelativeVolume))
-                {
-                    didChangeAppVolumes = true;
-                }
-
-                if(mClientMap.SetClientsRelativeVolume(theAppBundleID, theRelativeVolume))
-                {
-                    didChangeAppVolumes = true;
-                }
-
-                // TODO: If the app isn't currently a client, we should add it to the past clients
-                //       map, or update its past volume if it's already in there.
-            }
-        }
-        
-        bool didGetPanPosition;
-        {
-            SInt32 thePanPosition;
-            didGetPanPosition = theAppVolume.GetSInt32(CFSTR(kNovaLINKAppVolumesKey_PanPosition), thePanPosition);
-            if (didGetPanPosition) {
-                ThrowIf(didGetPanPosition && (thePanPosition < kAppPanLeftRawValue || thePanPosition > kAppPanRightRawValue),
-                                              NovaLINK_InvalidClientPanPositionException(),
-                                              "NovaLINK_Clients::SetClientsRelativeVolumes: Pan position for app out of valid range");
-                
-                if(mClientMap.SetClientsPanPosition(theAppPID, thePanPosition))
-                {
-                    didChangeAppVolumes = true;
-                }
-
-                if(mClientMap.SetClientsPanPosition(theAppBundleID, thePanPosition))
-                {
-                    didChangeAppVolumes = true;
-                }
-
-                // TODO: If the app isn't currently a client, we should add it to the past clients
-                //       map, or update its past pan position if it's already in there.
-            }
-        }
-        
-        ThrowIf(!didGetVolume && !didGetPanPosition,
-                NovaLINK_InvalidClientRelativeVolumeException(),
-                "NovaLINK_Clients::SetClientsRelativeVolumes: No volume or pan position in request");
-    }
-    
-    return didChangeAppVolumes;
 }
 

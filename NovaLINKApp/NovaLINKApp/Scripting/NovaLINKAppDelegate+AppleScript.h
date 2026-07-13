@@ -25,7 +25,6 @@
 
 // Local Includes
 #import "NovaLINKASOutputDevice.h"
-#import "NovaLINKASApplication.h"
 
 // System Includes
 #import <Foundation/Foundation.h>
@@ -40,9 +39,7 @@
 @property NovaLINKASOutputDevice* selectedOutputDevice;
 @property (readonly) NSArray<NovaLINKASOutputDevice*>* outputDevices;
 @property double mainVolume;
-@property (readonly) NSArray<NovaLINKASApplication*>* applications;
 
 @end
 
 #pragma clang assume_nonnull end
-

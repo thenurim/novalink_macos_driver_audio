@@ -24,8 +24,6 @@
 
 // Local Includes
 #import "NovaLINK_TestUtils.h"
-#import "NovaLINK_Types.h"
-#import "NovaLINKDevice.h"
 
 // Scripting Bridge Includes
 #import "NovaLINKApp.h"
@@ -131,7 +129,7 @@
         [icon click];
     }
 
-    [menuItems[@"Quit NovaLINK"] click];
+    [menuItems[@"Quit NovaLINK Audio Passthrough"] click];
 
     // NovaLINKApp should quit.
     XCTAssertTrue([app waitForState:XCUIApplicationStateNotRunning timeout:10.0]);
@@ -204,68 +202,6 @@
     // The name of the Auto-pause menu item should change back.
     [icon click];
     XCTAssert(menuItems[@"Auto-pause iTunes"].exists);
-}
-
-- (void) testOutputVolumeSlider {
-    const AudioObjectPropertyScope scope = kAudioDevicePropertyScopeOutput;
-    const UInt32 channel = kMasterChannel;
-
-    [icon click];
-    
-    XCUIElement* slider = menuItems.sliders[@"Output Volume"];
-
-    // Try to slide the slider all the way to the right.
-    [slider adjustToNormalizedSliderPosition:1.0f];
-
-    // For whatever reason, XCTest usually doesn't quite make it to the position you ask for. So
-    // just check that it got close enough.
-    XCTAssertGreaterThan(slider.normalizedSliderPosition, 0.9f);
-
-    // NovaLINKDevice's volume should be set to its max, or as close as XCTest was able to get the
-    // slider. Probably shouldn't be comparing floats for equality like this, but it's working fine
-    // so far.
-    NovaLINKDevice novaLINKDevice;
-    XCTAssertEqual(slider.normalizedSliderPosition,
-                   novaLINKDevice.GetVolumeControlScalarValue(scope, channel));
-
-    // Try to slide the slider all the way to the left.
-    [slider adjustToNormalizedSliderPosition:0.0f];
-
-    // NovaLINKDevice's volume should be set to the new value of the slider.
-    XCTAssertLessThan(slider.normalizedSliderPosition, 0.1f);
-    XCTAssertEqual(slider.normalizedSliderPosition,
-                   novaLINKDevice.GetVolumeControlScalarValue(scope, channel));
-
-    // Try to slide the slider to 75%.
-    [slider adjustToNormalizedSliderPosition:0.75f];
-
-    // NovaLINKDevice's volume should be set to the new value of the slider, about 75% of its max.
-    XCTAssertEqual(slider.normalizedSliderPosition,
-                   novaLINKDevice.GetVolumeControlScalarValue(scope, channel));
-
-    // NovaLINKDevice should be unmuted.
-    XCTAssertEqual(false, novaLINKDevice.GetMuteControlValue(scope, channel));
-
-    // Set NovaLINKDevice's volume to its min.
-    novaLINKDevice.SetVolumeControlScalarValue(scope, channel, 0.0f);
-
-    // The slider should be set to its min value. Use a wait for this check because the change
-    // happens asynchronously.
-    [self expectationForPredicate:[NSPredicate predicateWithFormat:@"normalizedSliderPosition == 0"]
-              evaluatedWithObject:slider
-                          handler:nil];
-    [self waitForExpectationsWithTimeout:10.0 handler:nil];
-
-    XCTAssertEqual(0.0f, slider.normalizedSliderPosition);
-
-    // Click the slider without changing it to simulate the user setting the slider to zero.
-    [slider adjustToNormalizedSliderPosition:0.0f];
-
-    // NovaLINKDevice's volume should still be set to its min.
-    XCTAssertEqual(0.0f, novaLINKDevice.GetVolumeControlScalarValue(scope, channel));
-
-    // NovaLINKDevice should now be muted.
-    XCTAssertEqual(true, novaLINKDevice.GetMuteControlValue(scope, channel));
 }
 
 @end

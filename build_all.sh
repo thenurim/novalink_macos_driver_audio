@@ -48,8 +48,8 @@ rm -rf "${OUT_DIR}/NovaLINK Audio Device.driver" \
 
 cp -R "${ROOT}/build/DerivedData-Driver/Build/Products/${CONFIG}/NovaLINK Audio Device.driver" \
   "${OUT_DIR}/"
-cp -R "${ROOT}/build/DerivedData-App/Build/Products/${CONFIG}/NovaLINKAudioPassthrough.app" \
-  "${OUT_DIR}/NovaLINK Audio Passthrough.app"
+cp -R "${ROOT}/build/DerivedData-App/Build/Products/${CONFIG}/NovaLINK Audio Passthrough.app" \
+  "${OUT_DIR}/"
 cp -R "${ROOT}/build/DerivedData-App/Build/Products/${CONFIG}/NovaLINKXPCHelper.xpc" \
   "${OUT_DIR}/"
 

@@ -19,7 +19,7 @@
 //
 //  Copyright © 2016 Kyle Neideck
 //
-//  This class manages the "About NovaLINK" window.
+//  This class manages the "About NovaLINK Audio Passthrough" window.
 //
 
 // System Includes

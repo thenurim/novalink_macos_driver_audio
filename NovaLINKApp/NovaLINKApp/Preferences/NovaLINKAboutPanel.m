@@ -86,34 +86,34 @@ static NSInteger const kContributorsLabelTag = 4;
             [[bundle infoDictionary] objectForKey:@"NSHumanReadableCopyright"];
         
         if (copyrightNotice) {
-            // Remove the part that we replace with a link.
-            copyrightLabel.stringValue =
-                [((NSString*)copyrightNotice) stringByReplacingOccurrencesOfString:contributorsLabel.stringValue
-                                                                        withString:@""];
+            copyrightLabel.alignment = NSTextAlignmentCenter;
+            copyrightLabel.stringValue = (NSString*)copyrightNotice;
         }
         
         // Project website link label
         websiteLabel.selectable = YES;
         websiteLabel.allowsEditingTextAttributes = YES;
+        websiteLabel.alignment = NSTextAlignmentCenter;
         
         NSString* projectURL = [NSString stringWithUTF8String:kNovaLINKProjectURL];
-        NSFont* linkFont = websiteLabel.font ? websiteLabel.font : [NSFont labelFontOfSize:0.0];
+        NSFont* linkFont = [NSFont labelFontOfSize:11.0];
+        NSMutableParagraphStyle* centered = [[NSMutableParagraphStyle alloc] init];
+        centered.alignment = NSTextAlignmentCenter;
         websiteLabel.attributedStringValue =
             [[NSAttributedString alloc] initWithString:projectURL
                                             attributes:@{ NSLinkAttributeName: projectURL,
-                                                          NSFontAttributeName: linkFont }];
+                                                          NSFontAttributeName: linkFont,
+                                                          NSParagraphStyleAttributeName: centered }];
+        [websiteLabel sizeToFit];
+        // Keep the link horizontally centered in the left column (separator is at x≈383).
+        CGFloat leftColumnWidth = 383.0;
+        NSRect websiteFrame = websiteLabel.frame;
+        websiteFrame.origin.x = MAX(8.0, (leftColumnWidth - websiteFrame.size.width) / 2.0);
+        websiteFrame.size.width = MIN(websiteFrame.size.width + 4.0, leftColumnWidth - 16.0);
+        websiteLabel.frame = websiteFrame;
         
-        // Contributors link label
-        // TODO: Proper credits (i.e. in the app instead of just a link)
-        contributorsLabel.selectable = YES;
-        contributorsLabel.allowsEditingTextAttributes = YES;
-        
-        NSString* contributorsURL = [NSString stringWithUTF8String:kNovaLINKContributorsURL];
-        NSFont* cLinkFont = contributorsLabel.font ? contributorsLabel.font : [NSFont labelFontOfSize:0.0];
-        contributorsLabel.attributedStringValue =
-            [[NSAttributedString alloc] initWithString:contributorsLabel.stringValue
-                                            attributes:@{ NSLinkAttributeName: contributorsURL,
-                                                          NSFontAttributeName: cLinkFont }];
+        // Contributors link is unused in the current layout.
+        contributorsLabel.hidden = YES;
         
         // Load the text of the license into the text view
         NSString* __nullable licensePath = [bundle pathForResource:@"LICENSE" ofType:nil];

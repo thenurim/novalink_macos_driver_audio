@@ -29,7 +29,6 @@
 #import "NovaLINKAudioDevice.h"
 #import "NovaLINKDeviceControlSync.h"
 #import "NovaLINKOutputDeviceMenuSection.h"
-#import "NovaLINKOutputVolumeMenuItem.h"
 #import "NovaLINKPlayThrough.h"
 #import "NovaLINKXPCProtocols.h"
 
@@ -60,7 +59,6 @@
     // A connection to NovaLINKXPCHelper so we can send it the ID of the output device.
     NSXPCConnection* __nullable novaLINKXPCHelperConnection;
 
-    NovaLINKOutputVolumeMenuItem* __nullable outputVolumeMenuItem;
     NovaLINKOutputDeviceMenuSection* __nullable outputDeviceMenuSection;
 
     NSRecursiveLock* stateLock;
@@ -72,7 +70,6 @@
     if ((self = [super init])) {
         stateLock = [NSRecursiveLock new];
         novaLINKXPCHelperConnection = nil;
-        outputVolumeMenuItem = nil;
         outputDeviceMenuSection = nil;
         outputDevice = kAudioObjectUnknown;
 
@@ -99,10 +96,6 @@
     } @finally {
         [stateLock unlock];
     }
-}
-
-- (void) setOutputVolumeMenuItem:(NovaLINKOutputVolumeMenuItem*)item {
-    outputVolumeMenuItem = item;
 }
 
 - (void) setOutputDeviceMenuSection:(NovaLINKOutputDeviceMenuSection*)menuSection {
@@ -329,8 +322,6 @@
     // Tell NovaLINKXPCHelper that the output device has changed.
     [self sendOutputDeviceToNovaLINKXPCHelper];
 
-    // Update the menu item for the volume of the output device.
-    [outputVolumeMenuItem outputDeviceDidChange];
     [outputDeviceMenuSection outputDeviceDidChange];
 }
 

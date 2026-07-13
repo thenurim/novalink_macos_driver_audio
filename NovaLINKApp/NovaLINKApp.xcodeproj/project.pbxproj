@@ -44,7 +44,6 @@
 		1C1AA4B11F9DE3B700BCFB22 /* NovaLINKAudioDevice.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 1CF5423A1EAAEE4300445AD8 /* NovaLINKAudioDevice.cpp */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKXPCHelper-NovaLINKAudioDevice.cpp"; }; };
 		1C1AA4B21F9DE3B700BCFB22 /* NovaLINKDevice.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 1CACCF371F3175AD007F86CA /* NovaLINKDevice.cpp */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKXPCHelper-NovaLINKDevice.cpp"; }; };
 		1C1AA4B31F9DE40000BCFB22 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1CD1FD2F1BDDEAF2004F7E1B /* AudioToolbox.framework */; };
-		1C227C0B1FA4C48200A95B6D /* NovaLINKAppVolumes.m in Sources */ = {isa = PBXBuildFile; fileRef = 1C3DB4881BE0885A00EC8160 /* NovaLINKAppVolumes.m */; };
 		1C2336DA1BEAB6E7004C1C4E /* NovaLINKMusicPlayer.m in Sources */ = {isa = PBXBuildFile; fileRef = 1C2336D91BEAB6E7004C1C4E /* NovaLINKMusicPlayer.m */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKApp-NovaLINKMusicPlayer.m"; }; };
 		1C2336DF1BEAE10C004C1C4E /* NovaLINKSpotify.m in Sources */ = {isa = PBXBuildFile; fileRef = 1C2336DE1BEAE10C004C1C4E /* NovaLINKSpotify.m */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKApp-NovaLINKSpotify.m"; }; };
 		1C2FC3041EB4D6E700A76592 /* NovaLINKApp.sdef in Resources */ = {isa = PBXBuildFile; fileRef = 1C2FC2FF1EB4D6E700A76592 /* NovaLINKApp.sdef */; };
@@ -55,7 +54,6 @@
 		1C3D36721ED90E8600F98E66 /* NovaLINKDeviceControlsList.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 1C3D36701ED90E8600F98E66 /* NovaLINKDeviceControlsList.cpp */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKApp-NovaLINKDeviceControlsList.cpp"; }; };
 		1C3D36731ED90E8600F98E66 /* NovaLINKDeviceControlsList.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 1C3D36701ED90E8600F98E66 /* NovaLINKDeviceControlsList.cpp */; };
 		1C3D36741ED90E8600F98E66 /* NovaLINKDeviceControlsList.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 1C3D36701ED90E8600F98E66 /* NovaLINKDeviceControlsList.cpp */; };
-		1C3DB4891BE0885A00EC8160 /* NovaLINKAppVolumes.m in Sources */ = {isa = PBXBuildFile; fileRef = 1C3DB4881BE0885A00EC8160 /* NovaLINKAppVolumes.m */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKApp-NovaLINKAppVolumes.m"; }; };
 		1C4699471BD5C0E400F78043 /* NovaLINKiTunes.m in Sources */ = {isa = PBXBuildFile; fileRef = 1C4699461BD5C0E400F78043 /* NovaLINKiTunes.m */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKApp-NovaLINKiTunes.m"; }; };
 		1C46994E1BD7694C00F78043 /* NovaLINKDeviceControlSync.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 1C46994C1BD7694C00F78043 /* NovaLINKDeviceControlSync.cpp */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKApp-NovaLINKDeviceControlSync.cpp"; }; };
 		1C4D1A1D217C7D6400A1ACD0 /* NovaLINKPreferredOutputDevices.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1C4D1A1C217C7D6400A1ACD0 /* NovaLINKPreferredOutputDevices.mm */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKApp-NovaLINKPreferredOutputDevices.mm"; }; };
@@ -74,16 +72,11 @@
 		1C62FE5523D423D700B9B68E /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1C62FE5423D423D700B9B68E /* XCTest.framework */; };
 		1C62FE5823D4278300B9B68E /* skip-ui-tests.py in Resources */ = {isa = PBXBuildFile; fileRef = 1C62FE5623D4278300B9B68E /* skip-ui-tests.py */; };
 		1C687A6B23B889E000834B75 /* NovaLINKPlayThroughRTLoggerTests.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1C687A6A23B889E000834B75 /* NovaLINKPlayThroughRTLoggerTests.mm */; };
-		1C780FF21FEF6C3B00497FAD /* NovaLINKSystemSoundsVolume.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1C780FF11FEF6C3B00497FAD /* NovaLINKSystemSoundsVolume.mm */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKApp-NovaLINKSystemSoundsVolume.mm"; }; };
-		1C780FF31FEF6C3B00497FAD /* NovaLINKSystemSoundsVolume.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1C780FF11FEF6C3B00497FAD /* NovaLINKSystemSoundsVolume.mm */; };
 		1C8034D520B0347A004BC50C /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1C8034D420B0347A004BC50C /* Security.framework */; };
 		1C80DED320A6718600045BBE /* NovaLINKAppWatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = 1C80DED220A6718600045BBE /* NovaLINKAppWatcher.m */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKApp-NovaLINKAppWatcher.m"; }; };
 		1C80DED420A6718600045BBE /* NovaLINKAppWatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = 1C80DED220A6718600045BBE /* NovaLINKAppWatcher.m */; };
 		1C8104AF22AD07E200B35517 /* NovaLINKAppWatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = 1C80DED220A6718600045BBE /* NovaLINKAppWatcher.m */; };
 		1C8104B022AD082E00B35517 /* NovaLINKGooglePlayMusicDesktopPlayer.m in Sources */ = {isa = PBXBuildFile; fileRef = 1C8D830A2042DE9500A838F2 /* NovaLINKGooglePlayMusicDesktopPlayer.m */; };
-		1C837DD81F6AA1F2004B1E60 /* NovaLINKOutputVolumeMenuItem.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1C837DD71F6AA1F2004B1E60 /* NovaLINKOutputVolumeMenuItem.mm */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKApp-NovaLINKOutputVolumeMenuItem.mm"; }; };
-		1C837DD91F6AA1F2004B1E60 /* NovaLINKOutputVolumeMenuItem.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1C837DD71F6AA1F2004B1E60 /* NovaLINKOutputVolumeMenuItem.mm */; };
-		1C837DDA1F6AA1F2004B1E60 /* NovaLINKOutputVolumeMenuItem.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1C837DD71F6AA1F2004B1E60 /* NovaLINKOutputVolumeMenuItem.mm */; };
 		1C86DA6A1F91EE3B000C8CCF /* CAPThread.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 1C8034C21BDAFD5700668E00 /* CAPThread.cpp */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKApp-CAPThread.cpp"; }; };
 		1C8B0C6A216205BF008C5679 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1C8B0C69216205BF008C5679 /* AVFoundation.framework */; };
 		1C8B0C6B21645355008C5679 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1C8B0C69216205BF008C5679 /* AVFoundation.framework */; };
@@ -113,9 +106,6 @@
 		1CCC4F4D1E581C40008053E4 /* NovaLINKMusicPlayersUnitTests.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1CCC4F4B1E581C40008053E4 /* NovaLINKMusicPlayersUnitTests.mm */; };
 		1CCC4F621E584100008053E4 /* NovaLINKAppUITests.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1CCC4F611E584100008053E4 /* NovaLINKAppUITests.mm */; };
 		1CD1FD301BDDEAF2004F7E1B /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1CD1FD2F1BDDEAF2004F7E1B /* AudioToolbox.framework */; };
-		1CD410D41F9EDDAD0070A094 /* NovaLINKAppVolumesController.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1CD410D31F9EDDAD0070A094 /* NovaLINKAppVolumesController.mm */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKApp-NovaLINKAppVolumesController.mm"; }; };
-		1CD410D51F9EDDAD0070A094 /* NovaLINKAppVolumesController.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1CD410D31F9EDDAD0070A094 /* NovaLINKAppVolumesController.mm */; };
-		1CD410D61F9EDDAD0070A094 /* NovaLINKAppVolumesController.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1CD410D31F9EDDAD0070A094 /* NovaLINKAppVolumesController.mm */; };
 		1CD989341ECFFC9E0014BBBF /* NovaLINK_Utils.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 27FB8C2E1DE468320084DB9D /* NovaLINK_Utils.cpp */; };
 		1CD989351ECFFC9E0014BBBF /* CACFArray.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 1CC1DF7D1BE5068A00FB8FE4 /* CACFArray.cpp */; };
 		1CD989361ECFFC9E0014BBBF /* CACFDictionary.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 1CC1DF7F1BE5068A00FB8FE4 /* CACFDictionary.cpp */; };
@@ -130,7 +120,6 @@
 		1CD9893F1ECFFC9E0014BBBF /* CAHALAudioSystemObject.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 1C1962F11BCABFC5008A4DF7 /* CAHALAudioSystemObject.cpp */; };
 		1CD989401ECFFCC50014BBBF /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1CD1FD2F1BDDEAF2004F7E1B /* AudioToolbox.framework */; };
 		1CD989411ECFFCD10014BBBF /* NovaLINKAppDelegate.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1CB8B33C1BBA75EF000E2DD1 /* NovaLINKAppDelegate.mm */; };
-		1CD989421ECFFCFC0014BBBF /* NovaLINKAppVolumes.m in Sources */ = {isa = PBXBuildFile; fileRef = 1C3DB4881BE0885A00EC8160 /* NovaLINKAppVolumes.m */; };
 		1CD989431ECFFCFC0014BBBF /* NovaLINKAudioDeviceManager.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1CED616B1C316E1A002CAFCF /* NovaLINKAudioDeviceManager.mm */; };
 		1CD989441ECFFCFC0014BBBF /* NovaLINKAutoPauseMenuItem.m in Sources */ = {isa = PBXBuildFile; fileRef = 27C457E51CF2BC2600A6C9A6 /* NovaLINKAutoPauseMenuItem.m */; };
 		1CD989451ECFFCFC0014BBBF /* NovaLINKAutoPauseMusic.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1C1465B71BCC3A73003AEFE6 /* NovaLINKAutoPauseMusic.mm */; };
@@ -225,8 +214,6 @@
 		27FB8C2F1DE468320084DB9D /* NovaLINK_Utils.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 27FB8C2E1DE468320084DB9D /* NovaLINK_Utils.cpp */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKApp-NovaLINK_Utils.cpp"; }; };
 		27FB8C301DE4758A0084DB9D /* NovaLINKPlayThrough.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 1C1962E51BC94E91008A4DF7 /* NovaLINKPlayThrough.cpp */; };
 		27FB8C311DE4758A0084DB9D /* NovaLINK_Utils.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 27FB8C2E1DE468320084DB9D /* NovaLINK_Utils.cpp */; };
-		9E129A412602AE620005851B /* NovaLINKASApplication.m in Sources */ = {isa = PBXBuildFile; fileRef = 9E129A402602AE620005851B /* NovaLINKASApplication.m */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKApp-NovaLINKASApplication.m"; }; };
-		9E542C7026057FBA0016C0B5 /* NovaLINKASApplication.m in Sources */ = {isa = PBXBuildFile; fileRef = 9E129A402602AE620005851B /* NovaLINKASApplication.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -235,7 +222,7 @@
 			containerPortal = 1CB8B32E1BBA75EF000E2DD1 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 1CB8B3351BBA75EF000E2DD1;
-			remoteInfo = "NovaLINK";
+			remoteInfo = NovaLINK;
 		};
 		278D71F31CABB88B00899CF9 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -307,8 +294,6 @@
 		1C2FC31D1EC723A100A76592 /* NovaLINKASOutputDevice.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = NovaLINKASOutputDevice.h; path = Scripting/NovaLINKASOutputDevice.h; sourceTree = "<group>"; };
 		1C3D36701ED90E8600F98E66 /* NovaLINKDeviceControlsList.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = NovaLINKDeviceControlsList.cpp; sourceTree = "<group>"; };
 		1C3D36711ED90E8600F98E66 /* NovaLINKDeviceControlsList.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = NovaLINKDeviceControlsList.h; sourceTree = "<group>"; };
-		1C3DB4881BE0885A00EC8160 /* NovaLINKAppVolumes.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = NovaLINKAppVolumes.m; sourceTree = "<group>"; };
-		1C3DB48A1BE0888500EC8160 /* NovaLINKAppVolumes.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = NovaLINKAppVolumes.h; sourceTree = "<group>"; };
 		1C43DABE22F582780004AF35 /* NovaLINKApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NovaLINKApp.entitlements; sourceTree = "<group>"; };
 		1C4699461BD5C0E400F78043 /* NovaLINKiTunes.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = NovaLINKiTunes.m; path = "Music Players/NovaLINKiTunes.m"; sourceTree = "<group>"; };
 		1C46994C1BD7694C00F78043 /* NovaLINKDeviceControlSync.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = NovaLINKDeviceControlSync.cpp; sourceTree = "<group>"; };
@@ -330,15 +315,11 @@
 		1C62FE5623D4278300B9B68E /* skip-ui-tests.py */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.python; name = "skip-ui-tests.py"; path = "UITests/skip-ui-tests.py"; sourceTree = "<group>"; };
 		1C62FE5923D44FC000B9B68E /* NovaLINKApp-Debug.entitlements */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.entitlements; path = "NovaLINKApp-Debug.entitlements"; sourceTree = "<group>"; };
 		1C687A6A23B889E000834B75 /* NovaLINKPlayThroughRTLoggerTests.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; name = NovaLINKPlayThroughRTLoggerTests.mm; path = UnitTests/NovaLINKPlayThroughRTLoggerTests.mm; sourceTree = "<group>"; };
-		1C780FF01FEF6C3B00497FAD /* NovaLINKSystemSoundsVolume.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NovaLINKSystemSoundsVolume.h; sourceTree = "<group>"; };
-		1C780FF11FEF6C3B00497FAD /* NovaLINKSystemSoundsVolume.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = NovaLINKSystemSoundsVolume.mm; sourceTree = "<group>"; };
 		1C8034C21BDAFD5700668E00 /* CAPThread.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = CAPThread.cpp; path = PublicUtility/CAPThread.cpp; sourceTree = "<group>"; };
 		1C8034C31BDAFD5700668E00 /* CAPThread.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = CAPThread.h; path = PublicUtility/CAPThread.h; sourceTree = "<group>"; };
 		1C8034D420B0347A004BC50C /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		1C80DED120A6718600045BBE /* NovaLINKAppWatcher.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NovaLINKAppWatcher.h; sourceTree = "<group>"; };
 		1C80DED220A6718600045BBE /* NovaLINKAppWatcher.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = NovaLINKAppWatcher.m; sourceTree = "<group>"; };
-		1C837DD61F6AA1F2004B1E60 /* NovaLINKOutputVolumeMenuItem.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = NovaLINKOutputVolumeMenuItem.h; sourceTree = "<group>"; };
-		1C837DD71F6AA1F2004B1E60 /* NovaLINKOutputVolumeMenuItem.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = NovaLINKOutputVolumeMenuItem.mm; sourceTree = "<group>"; };
 		1C8B0C69216205BF008C5679 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		1C8D8301204238DB00A838F2 /* Swinsian.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = Swinsian.h; path = "Music Players/Swinsian.h"; sourceTree = "<group>"; };
 		1C8D8302204238DB00A838F2 /* NovaLINKSwinsian.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = NovaLINKSwinsian.m; path = "Music Players/NovaLINKSwinsian.m"; sourceTree = "<group>"; };
@@ -350,7 +331,7 @@
 		1C9258462090287F00B8D3A6 /* NovaLINKGooglePlayMusicDesktopPlayerConnection.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = NovaLINKGooglePlayMusicDesktopPlayerConnection.m; path = "Music Players/NovaLINKGooglePlayMusicDesktopPlayerConnection.m"; sourceTree = "<group>"; };
 		1CACCF371F3175AD007F86CA /* NovaLINKDevice.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = NovaLINKDevice.cpp; sourceTree = "<group>"; };
 		1CACCF381F3175AD007F86CA /* NovaLINKDevice.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = NovaLINKDevice.h; sourceTree = "<group>"; };
-		1CB8B3361BBA75EF000E2DD1 /* NovaLINK Audio Passthrough.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NovaLINKAudioPassthrough.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1CB8B3361BBA75EF000E2DD1 /* NovaLINK Audio Passthrough.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "NovaLINK Audio Passthrough.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		1CB8B33A1BBA75EF000E2DD1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		1CB8B33B1BBA75EF000E2DD1 /* NovaLINKAppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NovaLINKAppDelegate.h; sourceTree = "<group>"; };
 		1CB8B33C1BBA75EF000E2DD1 /* NovaLINKAppDelegate.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = NovaLINKAppDelegate.mm; sourceTree = "<group>"; };
@@ -373,8 +354,6 @@
 		1CCC4F5F1E5840EF008053E4 /* NovaLINKAppUITests-Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = "NovaLINKAppUITests-Info.plist"; path = "UITests/NovaLINKAppUITests-Info.plist"; sourceTree = "<group>"; };
 		1CCC4F611E584100008053E4 /* NovaLINKAppUITests.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = NovaLINKAppUITests.mm; path = NovaLINKAppTests/UITests/NovaLINKAppUITests.mm; sourceTree = SOURCE_ROOT; };
 		1CD1FD2F1BDDEAF2004F7E1B /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
-		1CD410D21F9EDDAD0070A094 /* NovaLINKAppVolumesController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NovaLINKAppVolumesController.h; sourceTree = "<group>"; };
-		1CD410D31F9EDDAD0070A094 /* NovaLINKAppVolumesController.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = NovaLINKAppVolumesController.mm; sourceTree = "<group>"; };
 		1CDE224022CBB95B0008E3AC /* Music.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = Music.h; path = "Music Players/Music.h"; sourceTree = "<group>"; };
 		1CE03A55239B56740036908D /* NovaLINKDebugLoggingMenuItem.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NovaLINKDebugLoggingMenuItem.h; sourceTree = "<group>"; };
 		1CE03A56239B56740036908D /* NovaLINKDebugLoggingMenuItem.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = NovaLINKDebugLoggingMenuItem.m; sourceTree = "<group>"; };
@@ -435,8 +414,7 @@
 		27F7D48F1D2483B100821C4B /* NovaLINKDecibel.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = NovaLINKDecibel.m; path = "Music Players/NovaLINKDecibel.m"; sourceTree = "<group>"; };
 		27F7D4911D2484A300821C4B /* Decibel.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = Decibel.h; path = "Music Players/Decibel.h"; sourceTree = "<group>"; };
 		27FB8C2E1DE468320084DB9D /* NovaLINK_Utils.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = NovaLINK_Utils.cpp; path = ../SharedSource/NovaLINK_Utils.cpp; sourceTree = "<group>"; };
-		9E129A3F2602AE620005851B /* NovaLINKASApplication.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = NovaLINKASApplication.h; path = Scripting/NovaLINKASApplication.h; sourceTree = "<group>"; };
-		9E129A402602AE620005851B /* NovaLINKASApplication.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = NovaLINKASApplication.m; path = Scripting/NovaLINKASApplication.m; sourceTree = "<group>"; };
+		E8EC6C1B3004E1290033E3ED /* appicon.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = appicon.txt; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -566,8 +544,6 @@
 				1C2FC31D1EC723A100A76592 /* NovaLINKASOutputDevice.h */,
 				1C2FC31A1EC7238A00A76592 /* NovaLINKASOutputDevice.mm */,
 				1C2FC2FF1EB4D6E700A76592 /* NovaLINKApp.sdef */,
-				9E129A3F2602AE620005851B /* NovaLINKASApplication.h */,
-				9E129A402602AE620005851B /* NovaLINKASApplication.m */,
 			);
 			name = Scripting;
 			sourceTree = "<group>";
@@ -647,6 +623,7 @@
 				1CB8B3371BBA75EF000E2DD1 /* Products */,
 				1CF69BA31BCFF59C009B5D1F /* OptimizationProfiles */,
 				2743CA1B1D86DA9B0089613B /* Frameworks */,
+				E8EC6C1B3004E1290033E3ED /* appicon.txt */,
 			);
 			sourceTree = "<group>";
 		};
@@ -669,16 +646,8 @@
 				1CB8B33C1BBA75EF000E2DD1 /* NovaLINKAppDelegate.mm */,
 				1C80DED120A6718600045BBE /* NovaLINKAppWatcher.h */,
 				1C80DED220A6718600045BBE /* NovaLINKAppWatcher.m */,
-				1C837DD61F6AA1F2004B1E60 /* NovaLINKOutputVolumeMenuItem.h */,
-				1C837DD71F6AA1F2004B1E60 /* NovaLINKOutputVolumeMenuItem.mm */,
 				1CE03A55239B56740036908D /* NovaLINKDebugLoggingMenuItem.h */,
 				1CE03A56239B56740036908D /* NovaLINKDebugLoggingMenuItem.m */,
-				1C780FF01FEF6C3B00497FAD /* NovaLINKSystemSoundsVolume.h */,
-				1C780FF11FEF6C3B00497FAD /* NovaLINKSystemSoundsVolume.mm */,
-				1C3DB48A1BE0888500EC8160 /* NovaLINKAppVolumes.h */,
-				1C3DB4881BE0885A00EC8160 /* NovaLINKAppVolumes.m */,
-				1CD410D21F9EDDAD0070A094 /* NovaLINKAppVolumesController.h */,
-				1CD410D31F9EDDAD0070A094 /* NovaLINKAppVolumesController.mm */,
 				1CED616A1C316E1A002CAFCF /* NovaLINKAudioDeviceManager.h */,
 				1CED616B1C316E1A002CAFCF /* NovaLINKAudioDeviceManager.mm */,
 				1C4D1A1B217C7D6400A1ACD0 /* NovaLINKPreferredOutputDevices.h */,
@@ -876,7 +845,7 @@
 			);
 			dependencies = (
 			);
-			name = "NovaLINK";
+			name = NovaLINK;
 			productName = NovaLINKApp;
 			productReference = 1CB8B3361BBA75EF000E2DD1 /* NovaLINK Audio Passthrough.app */;
 			productType = "com.apple.product-type.application";
@@ -964,7 +933,7 @@
 					New,
 				);
 				LastUpgradeCheck = 0900;
-				ORGANIZATIONNAME = "NovaLINK contributors";
+				ORGANIZATIONNAME = "NovaLINK";
 				TargetAttributes = {
 					1CB8B3351BBA75EF000E2DD1 = {
 						CreatedOnToolsVersion = 6.4;
@@ -1115,10 +1084,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				1C86DA6A1F91EE3B000C8CCF /* CAPThread.cpp in Sources */,
-				1C780FF21FEF6C3B00497FAD /* NovaLINKSystemSoundsVolume.mm in Sources */,
 				1CE03A57239B56740036908D /* NovaLINKDebugLoggingMenuItem.m in Sources */,
 				1C4699471BD5C0E400F78043 /* NovaLINKiTunes.m in Sources */,
-				1CD410D41F9EDDAD0070A094 /* NovaLINKAppVolumesController.mm in Sources */,
 				1C1962E41BC94E15008A4DF7 /* CARingBuffer.cpp in Sources */,
 				1C8D830B2042DE9600A838F2 /* NovaLINKGooglePlayMusicDesktopPlayer.m in Sources */,
 				273F10DF1CC3D0B900C1C6DA /* NovaLINKVOX.m in Sources */,
@@ -1131,7 +1098,6 @@
 				1C2336DA1BEAB6E7004C1C4E /* NovaLINKMusicPlayer.m in Sources */,
 				1C1962F61BCABFC5008A4DF7 /* CAHALAudioSystemObject.cpp in Sources */,
 				1CC1DF821BE5068A00FB8FE4 /* CACFDictionary.cpp in Sources */,
-				1C3DB4891BE0885A00EC8160 /* NovaLINKAppVolumes.m in Sources */,
 				1C0BD0A51BF1A8E6004F4CF5 /* NovaLINKAutoPauseMusicPrefs.mm in Sources */,
 				1C1963061BCAF468008A4DF7 /* CAMutex.cpp in Sources */,
 				1CE7064C1BF1EC0600BFC06D /* NovaLINKOutputDeviceMenuSection.mm in Sources */,
@@ -1154,10 +1120,8 @@
 				1C80DED320A6718600045BBE /* NovaLINKAppWatcher.m in Sources */,
 				2743C9EC1D852B360089613B /* NovaLINKScriptingBridge.m in Sources */,
 				1CC6593C1F91DEB400B0CCDC /* NovaLINKTermination.mm in Sources */,
-				1C837DD81F6AA1F2004B1E60 /* NovaLINKOutputVolumeMenuItem.mm in Sources */,
 				1C9258472090287F00B8D3A6 /* NovaLINKGooglePlayMusicDesktopPlayerConnection.m in Sources */,
 				1C1963011BCAC0F6008A4DF7 /* CACFString.cpp in Sources */,
-				9E129A412602AE620005851B /* NovaLINKASApplication.m in Sources */,
 				1C1962E71BC94E91008A4DF7 /* NovaLINKPlayThrough.cpp in Sources */,
 				1C8D8304204238DB00A838F2 /* NovaLINKSwinsian.m in Sources */,
 				1C1962FA1BCAC061008A4DF7 /* CADebugMacros.cpp in Sources */,
@@ -1185,20 +1149,16 @@
 				1C8D830520423E1C00A838F2 /* NovaLINKSwinsian.m in Sources */,
 				1CE03A58239B56740036908D /* NovaLINKDebugLoggingMenuItem.m in Sources */,
 				1CACCF3A1F334447007F86CA /* NovaLINKDevice.cpp in Sources */,
-				1C780FF31FEF6C3B00497FAD /* NovaLINKSystemSoundsVolume.mm in Sources */,
 				1CC6593D1F91DEB400B0CCDC /* NovaLINKTermination.mm in Sources */,
 				1C80DED420A6718600045BBE /* NovaLINKAppWatcher.m in Sources */,
-				1CD410D51F9EDDAD0070A094 /* NovaLINKAppVolumesController.mm in Sources */,
 				1CD989571ECFFD250014BBBF /* CAHostTimeBase.cpp in Sources */,
 				1CD989581ECFFD250014BBBF /* CAMutex.cpp in Sources */,
 				1CD989591ECFFD250014BBBF /* CAPThread.cpp in Sources */,
 				1CD9895A1ECFFD250014BBBF /* CARingBuffer.cpp in Sources */,
-				1CD989421ECFFCFC0014BBBF /* NovaLINKAppVolumes.m in Sources */,
 				1CD989431ECFFCFC0014BBBF /* NovaLINKAudioDeviceManager.mm in Sources */,
 				1C4D1A1E217C7D6400A1ACD0 /* NovaLINKPreferredOutputDevices.mm in Sources */,
 				1CD989441ECFFCFC0014BBBF /* NovaLINKAutoPauseMenuItem.m in Sources */,
 				1CD989451ECFFCFC0014BBBF /* NovaLINKAutoPauseMusic.mm in Sources */,
-				1C837DD91F6AA1F2004B1E60 /* NovaLINKOutputVolumeMenuItem.mm in Sources */,
 				1CD989461ECFFCFC0014BBBF /* NovaLINKMusicPlayers.mm in Sources */,
 				1CD989471ECFFCFC0014BBBF /* NovaLINKScriptingBridge.m in Sources */,
 				1CD989481ECFFCFC0014BBBF /* NovaLINKMusicPlayer.m in Sources */,
@@ -1224,7 +1184,6 @@
 				1CD989361ECFFC9E0014BBBF /* CACFDictionary.cpp in Sources */,
 				1CD989371ECFFC9E0014BBBF /* CACFNumber.cpp in Sources */,
 				1CD989381ECFFC9E0014BBBF /* CACFString.cpp in Sources */,
-				9E542C7026057FBA0016C0B5 /* NovaLINKASApplication.m in Sources */,
 				1CD989391ECFFC9E0014BBBF /* CADebugger.cpp in Sources */,
 				1CD9893A1ECFFC9E0014BBBF /* CADebugMacros.cpp in Sources */,
 				1CD9893B1ECFFC9E0014BBBF /* CADebugPrintf.cpp in Sources */,
@@ -1280,7 +1239,6 @@
 				1C62FE5123D3EB2E00B9B68E /* Mock_CAHALAudioSystemObject.cpp in Sources */,
 				1C8104AF22AD07E200B35517 /* NovaLINKAppWatcher.m in Sources */,
 				1C8D830620423E2400A838F2 /* NovaLINKSwinsian.m in Sources */,
-				1C227C0B1FA4C48200A95B6D /* NovaLINKAppVolumes.m in Sources */,
 				1CACCF3B1F334450007F86CA /* NovaLINKDevice.cpp in Sources */,
 				1C8D830C2042DE9600A838F2 /* NovaLINKGooglePlayMusicDesktopPlayer.m in Sources */,
 				1C3D36741ED90E8600F98E66 /* NovaLINKDeviceControlsList.cpp in Sources */,
@@ -1290,7 +1248,6 @@
 				2743CA211D86DE780089613B /* NovaLINKDeviceControlSync.cpp in Sources */,
 				1CE03A59239B56740036908D /* NovaLINKDebugLoggingMenuItem.m in Sources */,
 				2743CA0C1D86D7FA0089613B /* CACFArray.cpp in Sources */,
-				1C837DDA1F6AA1F2004B1E60 /* NovaLINKOutputVolumeMenuItem.mm in Sources */,
 				2743CA0D1D86D7FA0089613B /* CACFDictionary.cpp in Sources */,
 				2743CA0E1D86D7FA0089613B /* CACFNumber.cpp in Sources */,
 				2743CA0F1D86D7FA0089613B /* CACFString.cpp in Sources */,
@@ -1308,7 +1265,6 @@
 				2743CA0A1D86D52D0089613B /* NovaLINKAudioDeviceManager.mm in Sources */,
 				2743CA031D86D41C0089613B /* NovaLINKScriptingBridge.m in Sources */,
 				2743CA041D86D41C0089613B /* NovaLINKMusicPlayer.m in Sources */,
-				1CD410D61F9EDDAD0070A094 /* NovaLINKAppVolumesController.mm in Sources */,
 				2743CA051D86D41C0089613B /* NovaLINKDecibel.m in Sources */,
 				2743CA061D86D41C0089613B /* NovaLINKSpotify.m in Sources */,
 				2743CA071D86D41C0089613B /* NovaLINKVLC.m in Sources */,
@@ -1372,8 +1328,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				NovaLINK_STOP_DEBUGGER_ON_LOGGED_EXCEPTIONS = 0;
-				NovaLINK_STOP_DEBUGGER_ON_LOGGED_UNEXPECTED_EXCEPTIONS = 1;
 				CLANG_ADDRESS_SANITIZER_CONTAINER_OVERFLOW = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_SECURITY_FLOATLOOPCOUNTER = YES;
@@ -1445,6 +1399,8 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 10.13;
 				MTL_ENABLE_DEBUG_INFO = YES;
+				NovaLINK_STOP_DEBUGGER_ON_LOGGED_EXCEPTIONS = 0;
+				NovaLINK_STOP_DEBUGGER_ON_LOGGED_UNEXPECTED_EXCEPTIONS = 1;
 				ONLY_ACTIVE_ARCH = YES;
 				OTHER_CFLAGS = "-fno-omit-frame-pointer";
 				RUN_CLANG_STATIC_ANALYZER = YES;
@@ -1469,7 +1425,7 @@
 				INFOPLIST_FILE = NovaLINKApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = life.thenurim.novalink.App;
-				PRODUCT_NAME = NovaLINKAudioPassthrough;
+				PRODUCT_NAME = "NovaLINK Audio Passthrough";
 				STRIP_STYLE = "non-global";
 				WARNING_CFLAGS = (
 					"-Wpartial-availability",
@@ -1482,8 +1438,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				NovaLINK_STOP_DEBUGGER_ON_LOGGED_EXCEPTIONS = 0;
-				NovaLINK_STOP_DEBUGGER_ON_LOGGED_UNEXPECTED_EXCEPTIONS = 1;
 				CLANG_ADDRESS_SANITIZER_CONTAINER_OVERFLOW = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_SECURITY_FLOATLOOPCOUNTER = YES;
@@ -1555,6 +1509,8 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 10.13;
 				MTL_ENABLE_DEBUG_INFO = YES;
+				NovaLINK_STOP_DEBUGGER_ON_LOGGED_EXCEPTIONS = 0;
+				NovaLINK_STOP_DEBUGGER_ON_LOGGED_UNEXPECTED_EXCEPTIONS = 1;
 				ONLY_ACTIVE_ARCH = YES;
 				OTHER_CFLAGS = "-fno-omit-frame-pointer";
 				RUN_CLANG_STATIC_ANALYZER = YES;
@@ -1567,8 +1523,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				NovaLINK_STOP_DEBUGGER_ON_LOGGED_EXCEPTIONS = 0;
-				NovaLINK_STOP_DEBUGGER_ON_LOGGED_UNEXPECTED_EXCEPTIONS = 0;
 				CLANG_ADDRESS_SANITIZER_CONTAINER_OVERFLOW = NO;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_SECURITY_FLOATLOOPCOUNTER = YES;
@@ -1637,6 +1591,8 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 10.13;
 				MTL_ENABLE_DEBUG_INFO = NO;
+				NovaLINK_STOP_DEBUGGER_ON_LOGGED_EXCEPTIONS = 0;
+				NovaLINK_STOP_DEBUGGER_ON_LOGGED_UNEXPECTED_EXCEPTIONS = 0;
 				OTHER_CFLAGS = "";
 				RUN_CLANG_STATIC_ANALYZER = YES;
 				SDKROOT = macosx;
@@ -1660,7 +1616,7 @@
 				INFOPLIST_FILE = NovaLINKApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = life.thenurim.novalink.App;
-				PRODUCT_NAME = NovaLINKAudioPassthrough;
+				PRODUCT_NAME = "NovaLINK Audio Passthrough";
 				STRIP_STYLE = "non-global";
 				WARNING_CFLAGS = (
 					"-Wpartial-availability",
@@ -1695,7 +1651,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				LLVM_LTO = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = life.thenurim.novalink.App;
-				PRODUCT_NAME = NovaLINKAudioPassthrough;
+				PRODUCT_NAME = "NovaLINK Audio Passthrough";
 				STRIP_STYLE = "non-global";
 				WARNING_CFLAGS = (
 					"-Wno-profile-instr-out-of-date",
@@ -1718,7 +1674,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = life.thenurim.novalink.AppUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
-				TEST_TARGET_NAME = "NovaLINK";
+				TEST_TARGET_NAME = NovaLINK;
 				WARNING_CFLAGS = "";
 			};
 			name = Debug;
@@ -1735,7 +1691,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = life.thenurim.novalink.AppUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
-				TEST_TARGET_NAME = "NovaLINK";
+				TEST_TARGET_NAME = NovaLINK;
 				WARNING_CFLAGS = "";
 			};
 			name = Release;
@@ -1753,7 +1709,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = life.thenurim.novalink.AppUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
-				TEST_TARGET_NAME = "NovaLINK";
+				TEST_TARGET_NAME = NovaLINK;
 				WARNING_CFLAGS = "";
 			};
 			name = DebugOpt;

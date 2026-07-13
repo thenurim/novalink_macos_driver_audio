@@ -38,7 +38,6 @@
 #import <CoreAudio/AudioHardwareBase.h>
 
 // Forward Declarations
-@class NovaLINKOutputVolumeMenuItem;
 @class NovaLINKOutputDeviceMenuSection;
 
 
@@ -51,9 +50,6 @@ static const int kNovaLINKErrorCode_ReturningEarly       = 2;
 
 // Returns nil if NovaLINKDevice isn't installed.
 - (instancetype) init;
-
-// Set the NovaLINKOutputVolumeMenuItem to be notified when the output device is changed.
-- (void) setOutputVolumeMenuItem:(NovaLINKOutputVolumeMenuItem*)item;
 
 // Set the NovaLINKOutputDeviceMenuSection to be notified when the output device is changed.
 - (void) setOutputDeviceMenuSection:(NovaLINKOutputDeviceMenuSection*)menuSection;

@@ -79,7 +79,7 @@ static NSInteger const kAboutPanelMenuItemTag  = 4;
         [volumeIconMenuItem setTarget:self];
         [volumeIconMenuItem setAction:@selector(useVolumeStatusBarIcon)];
 
-        // Set up the "About NovaLINK" menu item
+        // Set up the "About NovaLINK Audio Passthrough" menu item
         NSMenuItem* aboutMenuItem = [prefsMenu itemWithTag:kAboutPanelMenuItemTag];
         [aboutMenuItem setTarget:aboutPanel];
         [aboutMenuItem setAction:@selector(show)];

@@ -326,7 +326,6 @@ bool	NovaLINK_Device::Device_HasProperty(AudioObjectID inObjectID, pid_t inClien
         case kAudioDeviceCustomPropertyMusicPlayerProcessID:
         case kAudioDeviceCustomPropertyMusicPlayerBundleID:
         case kAudioDeviceCustomPropertyDeviceIsRunningSomewhereOtherThanNovaLINKApp:
-        case kAudioDeviceCustomPropertyAppVolumes:
         case kAudioDeviceCustomPropertyEnabledOutputControls:
 			theAnswer = true;
 			break;
@@ -373,7 +372,6 @@ bool	NovaLINK_Device::Device_IsPropertySettable(AudioObjectID inObjectID, pid_t 
         case kAudioDevicePropertyNominalSampleRate:
         case kAudioDeviceCustomPropertyMusicPlayerProcessID:
         case kAudioDeviceCustomPropertyMusicPlayerBundleID:
-        case kAudioDeviceCustomPropertyAppVolumes:
         case kAudioDeviceCustomPropertyEnabledOutputControls:
 			theAnswer = true;
 			break;
@@ -461,7 +459,7 @@ UInt32	NovaLINK_Device::Device_GetPropertyDataSize(AudioObjectID inObjectID, pid
             break;
             
         case kAudioObjectPropertyCustomPropertyInfoList:
-            theAnswer = sizeof(AudioServerPlugInCustomPropertyInfo) * 6;
+            theAnswer = sizeof(AudioServerPlugInCustomPropertyInfo) * 5;
             break;
             
         case kAudioDeviceCustomPropertyDeviceAudibleState:
@@ -478,10 +476,6 @@ UInt32	NovaLINK_Device::Device_GetPropertyDataSize(AudioObjectID inObjectID, pid
             
         case kAudioDeviceCustomPropertyDeviceIsRunningSomewhereOtherThanNovaLINKApp:
             theAnswer = sizeof(CFBooleanRef);
-            break;
-            
-        case kAudioDeviceCustomPropertyAppVolumes:
-            theAnswer = sizeof(CFPropertyListRef);
             break;
 
         case kAudioDeviceCustomPropertyEnabledOutputControls:
@@ -888,46 +882,40 @@ void	NovaLINK_Device::Device_GetPropertyData(AudioObjectID inObjectID, pid_t inC
             theNumberItemsToFetch = inDataSize / sizeof(AudioServerPlugInCustomPropertyInfo);
             
             //	clamp it to the number of items we have
-            if(theNumberItemsToFetch > 6)
+            if(theNumberItemsToFetch > 5)
             {
-                theNumberItemsToFetch = 6;
+                theNumberItemsToFetch = 5;
             }
             
             if(theNumberItemsToFetch > 0)
             {
-                ((AudioServerPlugInCustomPropertyInfo*)outData)[0].mSelector = kAudioDeviceCustomPropertyAppVolumes;
+                ((AudioServerPlugInCustomPropertyInfo*)outData)[0].mSelector = kAudioDeviceCustomPropertyMusicPlayerProcessID;
                 ((AudioServerPlugInCustomPropertyInfo*)outData)[0].mPropertyDataType = kAudioServerPlugInCustomPropertyDataTypeCFPropertyList;
                 ((AudioServerPlugInCustomPropertyInfo*)outData)[0].mQualifierDataType = kAudioServerPlugInCustomPropertyDataTypeNone;
             }
             if(theNumberItemsToFetch > 1)
             {
-                ((AudioServerPlugInCustomPropertyInfo*)outData)[1].mSelector = kAudioDeviceCustomPropertyMusicPlayerProcessID;
-                ((AudioServerPlugInCustomPropertyInfo*)outData)[1].mPropertyDataType = kAudioServerPlugInCustomPropertyDataTypeCFPropertyList;
+                ((AudioServerPlugInCustomPropertyInfo*)outData)[1].mSelector = kAudioDeviceCustomPropertyMusicPlayerBundleID;
+                ((AudioServerPlugInCustomPropertyInfo*)outData)[1].mPropertyDataType = kAudioServerPlugInCustomPropertyDataTypeCFString;
                 ((AudioServerPlugInCustomPropertyInfo*)outData)[1].mQualifierDataType = kAudioServerPlugInCustomPropertyDataTypeNone;
             }
             if(theNumberItemsToFetch > 2)
             {
-                ((AudioServerPlugInCustomPropertyInfo*)outData)[2].mSelector = kAudioDeviceCustomPropertyMusicPlayerBundleID;
-                ((AudioServerPlugInCustomPropertyInfo*)outData)[2].mPropertyDataType = kAudioServerPlugInCustomPropertyDataTypeCFString;
+                ((AudioServerPlugInCustomPropertyInfo*)outData)[2].mSelector = kAudioDeviceCustomPropertyDeviceIsRunningSomewhereOtherThanNovaLINKApp;
+                ((AudioServerPlugInCustomPropertyInfo*)outData)[2].mPropertyDataType = kAudioServerPlugInCustomPropertyDataTypeCFPropertyList;
                 ((AudioServerPlugInCustomPropertyInfo*)outData)[2].mQualifierDataType = kAudioServerPlugInCustomPropertyDataTypeNone;
             }
             if(theNumberItemsToFetch > 3)
             {
-                ((AudioServerPlugInCustomPropertyInfo*)outData)[3].mSelector = kAudioDeviceCustomPropertyDeviceIsRunningSomewhereOtherThanNovaLINKApp;
+                ((AudioServerPlugInCustomPropertyInfo*)outData)[3].mSelector = kAudioDeviceCustomPropertyDeviceAudibleState;
                 ((AudioServerPlugInCustomPropertyInfo*)outData)[3].mPropertyDataType = kAudioServerPlugInCustomPropertyDataTypeCFPropertyList;
                 ((AudioServerPlugInCustomPropertyInfo*)outData)[3].mQualifierDataType = kAudioServerPlugInCustomPropertyDataTypeNone;
             }
             if(theNumberItemsToFetch > 4)
             {
-                ((AudioServerPlugInCustomPropertyInfo*)outData)[4].mSelector = kAudioDeviceCustomPropertyDeviceAudibleState;
+                ((AudioServerPlugInCustomPropertyInfo*)outData)[4].mSelector = kAudioDeviceCustomPropertyEnabledOutputControls;
                 ((AudioServerPlugInCustomPropertyInfo*)outData)[4].mPropertyDataType = kAudioServerPlugInCustomPropertyDataTypeCFPropertyList;
                 ((AudioServerPlugInCustomPropertyInfo*)outData)[4].mQualifierDataType = kAudioServerPlugInCustomPropertyDataTypeNone;
-            }
-            if(theNumberItemsToFetch > 5)
-            {
-                ((AudioServerPlugInCustomPropertyInfo*)outData)[5].mSelector = kAudioDeviceCustomPropertyEnabledOutputControls;
-                ((AudioServerPlugInCustomPropertyInfo*)outData)[5].mPropertyDataType = kAudioServerPlugInCustomPropertyDataTypeCFPropertyList;
-                ((AudioServerPlugInCustomPropertyInfo*)outData)[5].mQualifierDataType = kAudioServerPlugInCustomPropertyDataTypeNone;
             }
 
             outDataSize = theNumberItemsToFetch * sizeof(AudioServerPlugInCustomPropertyInfo);
@@ -968,15 +956,6 @@ void	NovaLINK_Device::Device_GetPropertyData(AudioObjectID inObjectID, pid_t inC
             ThrowIf(inDataSize < sizeof(CFBooleanRef), CAException(kAudioHardwareBadPropertySizeError), "NovaLINK_Device::Device_GetPropertyData: not enough space for the return value of kAudioDeviceCustomPropertyDeviceIsRunningSomewhereOtherThanNovaLINKApp for the device");
             *reinterpret_cast<CFBooleanRef*>(outData) = mClients.ClientsOtherThanNovaLINKAppRunningIO() ? kCFBooleanTrue : kCFBooleanFalse;
             outDataSize = sizeof(CFBooleanRef);
-            break;
-            
-        case kAudioDeviceCustomPropertyAppVolumes:
-            {
-                ThrowIf(inDataSize < sizeof(CFArrayRef), CAException(kAudioHardwareBadPropertySizeError), "NovaLINK_Device::Device_GetPropertyData: not enough space for the return value of kAudioDeviceCustomPropertyAppVolumes for the device");
-                CAMutex::Locker theStateLocker(mStateMutex);
-                *reinterpret_cast<CFArrayRef*>(outData) = mClients.CopyClientRelativeVolumesAsAppVolumes().GetCFArray();
-                outDataSize = sizeof(CFArrayRef);
-            }
             break;
 
         case kAudioDeviceCustomPropertyEnabledOutputControls:
@@ -1081,41 +1060,6 @@ void	NovaLINK_Device::Device_SetPropertyData(AudioObjectID inObjectID, pid_t inC
             }
             break;
             
-        case kAudioDeviceCustomPropertyAppVolumes:
-            {
-                ThrowIf(inDataSize < sizeof(CFArrayRef), CAException(kAudioHardwareBadPropertySizeError), "NovaLINK_Device::Device_SetPropertyData: wrong size for the data for kAudioDeviceCustomPropertyAppVolumes");
-                
-                CFArrayRef arrayRef = *reinterpret_cast<const CFArrayRef*>(inData);
-
-                ThrowIfNULL(arrayRef, CAException(kAudioHardwareIllegalOperationError), "NovaLINK_Device::Device_SetPropertyData: kAudioDeviceCustomPropertyAppVolumes cannot be set to NULL");
-                ThrowIf(CFGetTypeID(arrayRef) != CFArrayGetTypeID(), CAException(kAudioHardwareIllegalOperationError), "NovaLINK_Device::Device_SetPropertyData: CFType given for kAudioDeviceCustomPropertyAppVolumes was not a CFArray");
-                
-                CACFArray array(arrayRef, false);
-
-                bool propertyWasChanged = false;
-
-				CAMutex::Locker theStateLocker(mStateMutex);
-
-				try
-                {
-                    propertyWasChanged = mClients.SetClientsRelativeVolumes(array);
-                }
-                catch(NovaLINK_InvalidClientRelativeVolumeException)
-                {
-                    Throw(CAException(kAudioHardwareIllegalOperationError));
-                }
-                
-                if(propertyWasChanged)
-                {
-                    // Send notification
-                    CADispatchQueue::GetGlobalSerialQueue().Dispatch(false,	^{
-                        AudioObjectPropertyAddress theChangedProperties[] = { kNovaLINKAppVolumesAddress };
-                        NovaLINK_PlugIn::Host_PropertiesChanged(inObjectID, 1, theChangedProperties);
-                    });
-                }
-            }
-            break;
-
         case kAudioDeviceCustomPropertyEnabledOutputControls:
             {
                 ThrowIf(inDataSize < sizeof(CFArrayRef),
@@ -1387,7 +1331,6 @@ void	NovaLINK_Device::DoIOOperation(AudioObjectID inStreamObjectID, UInt32 inCli
 												 inIOCycleInfo.mOutputTime.mSampleTime,
 												 reinterpret_cast<const Float32*>(ioMainBuffer));
             }
-            ApplyClientRelativeVolume(inClientID, inIOBufferFrameSize, ioMainBuffer);
             break;
 
         case kAudioServerPlugInIOOperationProcessMix:
@@ -1520,53 +1463,6 @@ void	NovaLINK_Device::WriteOutputData(UInt32 inIOBufferFrameSize, Float64 inSamp
     if (err != kCARingBufferError_OK && err != kCARingBufferError_CPUOverload)
     {
         Throw(CAException(err));
-    }
-}
-
-void	NovaLINK_Device::ApplyClientRelativeVolume(UInt32 inClientID, UInt32 inIOBufferFrameSize, void* ioBuffer) const
-{
-    Float32* theBuffer = reinterpret_cast<Float32*>(ioBuffer);
-    Float32 theRelativeVolume = mClients.GetClientRelativeVolumeRT(inClientID);
-    
-    auto thePanPositionInt = mClients.GetClientPanPositionRT(inClientID);
-    Float32 thePanPosition = static_cast<Float32>(thePanPositionInt) / 100.0f;
-    
-    // TODO When we get around to supporting devices with more than two channels it would be worth looking into
-    //      kAudioFormatProperty_PanningMatrix and kAudioFormatProperty_BalanceFade in AudioFormat.h.
-    
-    // TODO precompute matrix coefficients w/ volume and do everything in one pass
-    
-    // Apply balance w/ crossfeed to the frames in the buffer.
-    // Expect samples interleaved, starting with left
-    if (thePanPosition > 0.0f) {
-        for (UInt32 i = 0; i < inIOBufferFrameSize * 2; i += 2) {
-            auto L = i;
-            auto R = i + 1;
-            
-            theBuffer[R] = theBuffer[R] + theBuffer[L] * thePanPosition;
-            theBuffer[L] = theBuffer[L] * (1 - thePanPosition);
-        }
-    } else if (thePanPosition < 0.0f) {
-        for (UInt32 i = 0; i < inIOBufferFrameSize * 2; i += 2) {
-            auto L = i;
-            auto R = i + 1;
-            
-            theBuffer[L] = theBuffer[L] + theBuffer[R] * (-thePanPosition);
-            theBuffer[R] = theBuffer[R] * (1 + thePanPosition);
-        }
-    }
-
-    if(theRelativeVolume != 1.0f)
-    {
-        for(UInt32 i = 0; i < inIOBufferFrameSize * 2; i++)
-        {
-            Float32 theAdjustedSample = theBuffer[i] * theRelativeVolume;
-            
-            // Clamp to [-1, 1].
-            // (This way is roughly 6 times faster than using std::min and std::max because the compiler can vectorize the loop.)
-            const Float32 theAdjustedSampleClippedBelow = theAdjustedSample < -1.0f ? -1.0f : theAdjustedSample;
-            theBuffer[i] = theAdjustedSampleClippedBelow > 1.0f ? 1.0f : theAdjustedSampleClippedBelow;
-        }
     }
 }
 

@@ -45,7 +45,7 @@ const AudioObjectPropertyScope kScope                   = kAudioDevicePropertySc
                  [key UTF8String]);
     }
 
-    return [@[@"selectedOutputDevice", @"outputDevices", @"mainVolume", @"applications"] containsObject:key];
+    return [@[@"selectedOutputDevice", @"outputDevices", @"mainVolume"] containsObject:key];
 }
 
 - (NovaLINKASOutputDevice*) selectedOutputDevice {
@@ -93,20 +93,6 @@ const AudioObjectPropertyScope kScope                   = kAudioDevicePropertySc
 - (void) setMainVolume:(double)mainVolume {
     NovaLINKAudioDevice novaLINKDevice = [self.audioDevices novaLINKDevice];
     novaLINKDevice.SetMasterVolumeScalar(kScope, (Float32)mainVolume);
-    [self.outputVolumeSlider setFloatValue:(float)mainVolume];
-}
-
-- (NSArray<NovaLINKASApplication*>*) applications {
-    NSArray<NSRunningApplication*>* apps = [[NSWorkspace sharedWorkspace] runningApplications];
-    NSMutableArray<NovaLINKASApplication*>* applications = [NSMutableArray arrayWithCapacity:[apps count]];
-
-    for (UInt32 i = 0; i < [apps count]; i++) {
-        NovaLINKASApplication *app = [[NovaLINKASApplication alloc] initWithApplication:apps[i] volumeController:self.appVolumes parentSpecifier:[self objectSpecifier] index:i];
-
-        [applications addObject:app];
-    }
-
-    return applications;
 }
 
 @end

@@ -26,18 +26,14 @@
 
 // Local Includes
 #import "NovaLINK_Utils.h"
-#import "NovaLINKAppVolumes.h"
-#import "NovaLINKAppVolumesController.h"
 #import "NovaLINKAutoPauseMusic.h"
 #import "NovaLINKAutoPauseMenuItem.h"
 #import "NovaLINKDebugLoggingMenuItem.h"
 #import "NovaLINKMusicPlayers.h"
 #import "NovaLINKOutputDeviceMenuSection.h"
-#import "NovaLINKOutputVolumeMenuItem.h"
 #import "NovaLINKPreferencesMenu.h"
 #import "NovaLINKPreferredOutputDevices.h"
 #import "NovaLINKStatusBarItem.h"
-#import "NovaLINKSystemSoundsVolume.h"
 #import "NovaLINKTermination.h"
 #import "NovaLINKUserDefaults.h"
 #import "NovaLINKXPCListener.h"
@@ -65,7 +61,6 @@ static NSString* const kOptShowDockIcon      = @"--show-dock-icon";
     NovaLINKAutoPauseMusic* autoPauseMusic;
     NovaLINKAutoPauseMenuItem* autoPauseMenuItem;
     NovaLINKMusicPlayers* musicPlayers;
-    NovaLINKSystemSoundsVolume* systemSoundsVolume;
     NovaLINKOutputDeviceMenuSection* outputDeviceMenuSection;
     NovaLINKPreferencesMenu* prefsMenu;
     NovaLINKDebugLoggingMenuItem* debugLoggingMenuItem;
@@ -74,7 +69,6 @@ static NSString* const kOptShowDockIcon      = @"--show-dock-icon";
 }
 
 @synthesize audioDevices = audioDevices;
-@synthesize appVolumes = appVolumes;
 
 - (void) awakeFromNib {
     [super awakeFromNib];
@@ -246,74 +240,12 @@ static NSString* const kOptShowDockIcon      = @"--show-dock-icon";
     }
 }
 
-- (void) menuWillOpen:(NSMenu*)menu {
-    if (@available(macOS 10.16, *)) {
-        // Set menu offset and check for any active menu items
-        float menuOffset = 12.0;
-        for (NSMenuItem* menuItem in self.novaLINKMenu.itemArray) {
-            if (menuItem.state == NSControlStateValueOn && menuItem.indentationLevel == 0) {
-                menuOffset += 10;
-                break;
-            }
-        }
-        
-        // Align volume output device and slider
-        for (NSView* subview in self.outputVolumeView.subviews) {
-            CGRect newSubview = subview.frame;
-            newSubview.origin.x = menuOffset;
-            subview.frame = newSubview;
-        }
-
-        // Align system sounds and app volumes
-        double appIconTitleOffset = 0;
-        for (NSMenuItem* menuItem in self.novaLINKMenu.itemArray) {
-            if (menuItem.view.subviews.count == 7 || menuItem.view.subviews.count == 3) {
-                NSTextField* appTitle;
-                NSImageView* appIcon;
-                
-                for (NSView* subview in menuItem.view.subviews) {
-                    if (menuItem.view.subviews.count == 3) {
-                        // System sounds
-                        if ([subview isKindOfClass:[NSTextField class]]) {
-                            appTitle = (NSTextField*)subview;
-                        }
-                        if ([subview isKindOfClass:[NSImageView class]]) {
-                            appIcon = (NSImageView*)subview;
-                        }
-                    } else if (menuItem.view.subviews.count == 7) {
-                        // App volumes
-                        if ([subview isKindOfClass:[NovaLINKAVM_AppNameLabel class]]) {
-                            appTitle = (NSTextField*)subview;
-                        }
-                        if ([subview isKindOfClass:[NovaLINKAVM_AppIcon class]]) {
-                            appIcon = (NSImageView*)subview;
-                        }
-                    }
-                }
- 
-                if (appIconTitleOffset == 0) {
-                    appIconTitleOffset = appTitle.frame.origin.x - appIcon.frame.origin.x;
-                }
-                
-                CGRect newAppIcon = appIcon.frame;
-                newAppIcon.origin.x = menuOffset;
-                appIcon.frame = newAppIcon;
-                CGRect newAppTitle = appTitle.frame;
-                newAppTitle.origin.x = menuOffset + appIconTitleOffset;
-                appTitle.frame = newAppTitle;
-            }
-        }
-    }
-}
-
 - (void) setUpMainMenu {
     autoPauseMenuItem =
         [[NovaLINKAutoPauseMenuItem alloc] initWithMenuItem:self.autoPauseMenuItemUnwrapped
                                         autoPauseMusic:autoPauseMusic
                                           musicPlayers:musicPlayers
                                           userDefaults:userDefaults];
-
-    [self initVolumesMenuSection];
 
     // Output device selection.
     outputDeviceMenuSection =
@@ -344,36 +276,6 @@ static NSString* const kOptShowDockIcon      = @"--show-dock-icon";
         [NSProcessInfo.processInfo.arguments indexOfObject:kOptNoPersistentData] == NSNotFound;
     NSUserDefaults* wrappedDefaults = persistentDefaults ? [NSUserDefaults standardUserDefaults] : nil;
     return [[NovaLINKUserDefaults alloc] initWithDefaults:wrappedDefaults];
-}
-
-- (void) initVolumesMenuSection {
-    // Create the menu item with the (main) output volume slider.
-    NovaLINKOutputVolumeMenuItem* outputVolume =
-            [[NovaLINKOutputVolumeMenuItem alloc] initWithAudioDevices:audioDevices
-                                                             view:self.outputVolumeView
-                                                           slider:self.outputVolumeSlider
-                                                      deviceLabel:self.outputVolumeLabel];
-    [audioDevices setOutputVolumeMenuItem:outputVolume];
-
-    NSInteger headingIdx = [self.novaLINKMenu indexOfItemWithTag:kVolumesHeadingMenuItemTag];
-
-    // Add it to the main menu below the "Volumes" heading.
-    [self.novaLINKMenu insertItem:outputVolume atIndex:(headingIdx + 1)];
-
-    // Add the volume control for system (UI) sounds to the menu.
-    NovaLINKAudioDevice uiSoundsDevice = [audioDevices novaLINKDevice].GetUISoundsNovaLINKDeviceInstance();
-
-    systemSoundsVolume =
-        [[NovaLINKSystemSoundsVolume alloc] initWithUISoundsDevice:uiSoundsDevice
-                                                         view:self.systemSoundsView
-                                                       slider:self.systemSoundsSlider];
-
-    [self.novaLINKMenu insertItem:systemSoundsVolume.menuItem atIndex:(headingIdx + 2)];
-
-    // Add the app volumes to the menu.
-    appVolumes = [[NovaLINKAppVolumesController alloc] initWithMenu:self.novaLINKMenu
-                                                 appVolumeView:self.appVolumeView
-                                                  audioDevices:audioDevices];
 }
 
 - (void) applicationWillTerminate:(NSNotification*)aNotification {

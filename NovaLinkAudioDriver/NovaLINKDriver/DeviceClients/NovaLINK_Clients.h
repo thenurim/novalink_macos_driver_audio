@@ -28,9 +28,7 @@
 #include "NovaLINK_ClientMap.h"
 
 // PublicUtility Includes
-#include "CAVolumeCurve.h"
 #include "CAMutex.h"
-#include "CACFArray.h"
 
 // System Includes
 #include <CoreAudio/AudioServerPlugIn.h>
@@ -94,22 +92,6 @@ public:
     
     bool                                IsMusicPlayerRT(const UInt32 inClientID) const;
     
-    Float32                             GetClientRelativeVolumeRT(UInt32 inClientID) const;
-    SInt32                              GetClientPanPositionRT(UInt32 inClientID) const;
-    
-    // Copies the current and past clients into an array in the format expected for
-    // kAudioDeviceCustomPropertyAppVolumes. (Except that CACFArray and CACFDictionary are used instead
-    // of unwrapped CFArray and CFDictionary refs.)
-    CACFArray                           CopyClientRelativeVolumesAsAppVolumes() const { return mClientMap.CopyClientRelativeVolumesAsAppVolumes(mRelativeVolumeCurve); };
-    
-    // inAppVolumes is an array of dicts with the keys kNovaLINKAppVolumesKey_ProcessID,
-    // kNovaLINKAppVolumesKey_BundleID and optionally kNovaLINKAppVolumesKey_RelativeVolume and
-    // kNovaLINKAppVolumesKey_PanPosition. This method finds the client for
-    // each app by PID or bundle ID, sets the volume and applies mRelativeVolumeCurve to it.
-    //
-    // Returns true if any clients' relative volumes were changed.
-    bool                                SetClientsRelativeVolumes(const CACFArray inAppVolumes);
-    
 private:
     AudioObjectID                       mOwnerDeviceID;
     NovaLINK_ClientMap                       mClientMap;
@@ -140,12 +122,8 @@ private:
     // property's value if the HAL asks for it, and to recognise the music player if it's added a client.
     CACFString                          mMusicPlayerBundleIDProperty { "" };
     
-    // The volume curve we apply to raw client volumes before they're used
-    CAVolumeCurve                       mRelativeVolumeCurve;
-    
 };
 
 #pragma clang assume_nonnull end
 
 #endif /* __NovaLINKDriver__NovaLINK_Clients__ */
-

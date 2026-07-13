@@ -49,7 +49,7 @@ max_size_mb_for_rm=30
 
 file_paths=("${app_path}" "${driver_path}" "${xpc_path1}" "${xpc_path2}")
 
-novalink_app_process_name="NovaLINK"
+novalink_app_process_name="NovaLINK Audio Passthrough"
 
 launchd_plist_label="com.bearisdriving.NovaLINK.XPCHelper"
 launchd_plist="/Library/LaunchDaemons/${launchd_plist_label}.plist"

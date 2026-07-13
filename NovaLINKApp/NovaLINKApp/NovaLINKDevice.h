@@ -40,13 +40,6 @@
 // Local Includes
 #include "NovaLINK_Types.h"
 
-// PublicUtility Includes
-#include "CACFString.h"
-
-// STL Includes
-#include <vector>
-
-
 #pragma clang assume_nonnull begin
 
 class NovaLINKDevice
@@ -79,55 +72,6 @@ public:
      @throws CAException If the HAL responds with an error.
      */
     void                UnsetAsOSDefault(AudioDeviceID inOutputDeviceID);
-
-#pragma mark App Volumes
-
-public:
-    /*!
-     @return The current value of NovaLINKDevice's kAudioDeviceCustomPropertyAppVolumes property. See
-             NovaLINK_Types.h.
-     @throws CAException If the HAL returns an error or a non-array type. Callers are responsible
-                         for validating and type-checking the values contained in the array.
-     */
-    CFArrayRef          GetAppVolumes() const;
-    /*!
-     @param inVolume A value between kAppRelativeVolumeMinRawValue and kAppRelativeVolumeMaxRawValue
-                     from NovaLINK_Types.h. See kNovaLINKAppVolumesKey_RelativeVolume in NovaLINK_Types.h.
-     @param inAppProcessID The ID of app's main process (or the process it uses to play audio, if
-                           you've managed to figure that out). If an app has multiple audio
-                           processes, you can just set the volume for each of them. Pass -1 to omit
-                           this param.
-     @param inAppBundleID The app's bundle ID. Pass null to omit this param.
-     @throws CAException If the HAL returns an error when this function sends the volume change to
-                         NovaLINKDevice.
-     */
-    void                SetAppVolume(SInt32 inVolume,
-                                     pid_t inAppProcessID,
-                                     CFStringRef __nullable inAppBundleID);
-    /*!
-     @param inPanPosition A value between kAppPanLeftRawValue and kAppPanRightRawValue from
-                          NovaLINK_Types.h. A negative value has a higher proportion of left channel, and
-                          a positive value has a higher proportion of right channel.
-     @param inAppProcessID The ID of app's main process (or the process it uses to play audio, if
-                           you've managed to figure that out). If an app has multiple audio
-                           processes, you can just set the pan position for each of them. Pass -1 to
-                           omit this param.
-     @param inAppBundleID The app's bundle ID. Pass null to omit this param.
-     @throws CAException If the HAL returns an error when this function sends the pan position
-                         change to NovaLINKDevice.
-     */
-    void                SetAppPanPosition(SInt32 inPanPosition,
-                                          pid_t inAppProcessID,
-                                          CFStringRef __nullable inAppBundleID);
-
-private:
-    void                SendAppVolumeOrPanToNovaLINKDevice(SInt32 inNewValue,
-                                                      CFStringRef inVolumeTypeKey,
-                                                      pid_t inAppProcessID,
-                                                      CFStringRef __nullable inAppBundleID);
-
-    static std::vector<CACFString>
-                        ResponsibleBundleIDsOf(CACFString inParentBundleID);
 
 #pragma mark Audible State
 

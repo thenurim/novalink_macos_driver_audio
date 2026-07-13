@@ -69,7 +69,6 @@ void NovaLINKTermination::TestCrash()
     //                });
 
     // throw CAException(kAudioHardwareBadDeviceError);
-    // throw NovaLINK_InvalidClientRelativeVolumeException();
     // std::string().at(1);
     // *reinterpret_cast<int*>(0x1234) = 9;
     // [NSException raise:@"ObjC Test Exception" format:@"The description of the test exception."];

@@ -60,7 +60,6 @@ static NovaLINK_Client client2(&client2Info);
 - (void)setUp {
     [super setUp];
     
-    client1.mRelativeVolume = 0.625;
     client2.mIsMusicPlayer = true;
 }
 
@@ -96,7 +95,6 @@ static NovaLINK_Client client2(&client2Info);
     
     XCTAssertEqual(c1->mDoingIO, c2->mDoingIO);
     XCTAssertEqual(c1->mIsMusicPlayer, c2->mIsMusicPlayer);
-    XCTAssertEqual(c1->mRelativeVolume, c2->mRelativeVolume);
 }
 
 - (void)testClientConstruction {
@@ -125,7 +123,6 @@ static NovaLINK_Client client2(&client2Info);
     
     // A client to use as the out argument for GetClientNonRT when we don't expect to get a client back
     NovaLINK_Client notRetrievedClient(&client2Info);
-    notRetrievedClient.mRelativeVolume = 3.5;
     notRetrievedClient.mDoingIO = true;
     
     // A known-good copy to check against
@@ -150,7 +147,6 @@ static NovaLINK_Client client2(&client2Info);
     [NovaLINK_ClientMapTests assertClient:&notRetrievedClient isEqualTo:&notRetrievedClientCopy];
     
     // Check against hardcoded values as well just in case there's a problem with NovaLINK_Client's copy constructor
-    XCTAssertEqual(notRetrievedClient.mRelativeVolume, 3.5);
     XCTAssert(notRetrievedClient.mDoingIO);
 }
 

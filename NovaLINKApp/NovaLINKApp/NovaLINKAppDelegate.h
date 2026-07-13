@@ -25,28 +25,14 @@
 
 // Local Includes
 #import "NovaLINKAudioDeviceManager.h"
-#import "NovaLINKAppVolumesController.h"
 
 // System Includes
 #import <Cocoa/Cocoa.h>
 
 
-// Tags for UI elements in MainMenu.xib
-static NSInteger const kVolumesHeadingMenuItemTag = 3;
-static NSInteger const kSeparatorBelowVolumesMenuItemTag = 4;
-
 @interface NovaLINKAppDelegate : NSObject <NSApplicationDelegate, NSMenuDelegate>
 
 @property (weak) IBOutlet NSMenu* novaLINKMenu;
-
-@property (weak) IBOutlet NSView* outputVolumeView;
-@property (weak) IBOutlet NSTextField* outputVolumeLabel;
-@property (weak) IBOutlet NSSlider* outputVolumeSlider;
-
-@property (weak) IBOutlet NSView* systemSoundsView;
-@property (weak) IBOutlet NSSlider* systemSoundsSlider;
-
-@property (weak) IBOutlet NSView* appVolumeView;
 
 @property (weak) IBOutlet NSPanel* aboutPanel;
 @property (unsafe_unretained) IBOutlet NSTextView* aboutPanelLicenseView;
@@ -55,7 +41,5 @@ static NSInteger const kSeparatorBelowVolumesMenuItemTag = 4;
 @property (weak) IBOutlet NSMenuItem* debugLoggingMenuItemUnwrapped;
 
 @property (readonly) NovaLINKAudioDeviceManager* audioDevices;
-@property NovaLINKAppVolumesController* appVolumes;
 
 @end
-

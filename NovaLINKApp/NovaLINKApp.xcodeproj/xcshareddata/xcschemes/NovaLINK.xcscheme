@@ -15,7 +15,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "1CB8B3351BBA75EF000E2DD1"
-               BuildableName = "NovaLINKAudioPassthrough.app"
+               BuildableName = "NovaLINK Audio Passthrough.app"
                BlueprintName = "NovaLINK"
                ReferencedContainer = "container:NovaLINKApp.xcodeproj">
             </BuildableReference>
@@ -36,7 +36,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "1CB8B3351BBA75EF000E2DD1"
-            BuildableName = "NovaLINKAudioPassthrough.app"
+            BuildableName = "NovaLINK Audio Passthrough.app"
             BlueprintName = "NovaLINK"
             ReferencedContainer = "container:NovaLINKApp.xcodeproj">
          </BuildableReference>
@@ -57,7 +57,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "1CB8B3351BBA75EF000E2DD1"
-            BuildableName = "NovaLINKAudioPassthrough.app"
+            BuildableName = "NovaLINK Audio Passthrough.app"
             BlueprintName = "NovaLINK"
             ReferencedContainer = "container:NovaLINKApp.xcodeproj">
          </BuildableReference>
@@ -105,7 +105,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "1CB8B3351BBA75EF000E2DD1"
-            BuildableName = "NovaLINKAudioPassthrough.app"
+            BuildableName = "NovaLINK Audio Passthrough.app"
             BlueprintName = "NovaLINK"
             ReferencedContainer = "container:NovaLINKApp.xcodeproj">
          </BuildableReference>
@@ -151,7 +151,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "1CB8B3351BBA75EF000E2DD1"
-            BuildableName = "NovaLINKAudioPassthrough.app"
+            BuildableName = "NovaLINK Audio Passthrough.app"
             BlueprintName = "NovaLINK"
             ReferencedContainer = "container:NovaLINKApp.xcodeproj">
          </BuildableReference>

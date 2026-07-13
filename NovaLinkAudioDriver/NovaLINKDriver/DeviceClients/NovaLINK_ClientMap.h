@@ -30,8 +30,6 @@
 // PublicUtility Includes
 #include "CAMutex.h"
 #include "CACFString.h"
-#include "CACFArray.h"
-#include "CAVolumeCurve.h"
 
 // STL Includes
 #include <map>
@@ -51,7 +49,7 @@ class NovaLINK_ClientTasks;
 //  This class stores the clients (NovaLINK_Client) that have been registered with NovaLINKDevice by the HAL.
 //  It also maintains maps from clients' PIDs and bundle IDs to the clients. When a client is
 //  removed by the HAL we add it to a map of past clients to keep track of settings specific to that
-//  client. (Currently only the client's volume.)
+//  client.
 //
 //  Since the maps are read from during IO, this class has to be real-time safe when accessing
 //  them. So each map has an identical "shadow" map, which we use to buffer updates.
@@ -109,35 +107,6 @@ private:
     void                                                UpdateMusicPlayerFlagsInShadowMaps(std::function<bool(NovaLINK_Client)> inIsMusicPlayerTest);
     
 public:
-    // Copies the current and past clients into an array in the format expected for
-    // kAudioDeviceCustomPropertyAppVolumes. (Except that CACFArray and CACFDictionary are used instead
-    // of unwrapped CFArray and CFDictionary refs.)
-    CACFArray                                           CopyClientRelativeVolumesAsAppVolumes(CAVolumeCurve inVolumeCurve) const;
-    
-private:
-    void                                                CopyClientIntoAppVolumesArray(NovaLINK_Client inClient, CAVolumeCurve inVolumeCurve, CACFArray& ioAppVolumes) const;
-    
-public:
-    // Using the template function hits LLVM Bug 23987
-    // TODO Switch to template function
-    
-    // Returns true if a client for the key was found and its relative volume changed.
-    //template <typename T>
-    //bool                                                SetClientsRelativeVolume(T _Null_unspecified searchKey, Float32 inRelativeVolume);
-    //
-    //template <typename T>
-    //bool                                                SetClientsPanPosition(T _Null_unspecified searchKey, SInt32 inPanPosition);
-    
-    // Returns true if a client for PID inAppPID was found and its relative volume changed.
-    bool                                                SetClientsRelativeVolume(pid_t inAppPID, Float32 inRelativeVolume);
-    // Returns true if a client for bundle ID inAppBundleID was found and its relative volume changed.
-    bool                                                SetClientsRelativeVolume(CACFString inAppBundleID, Float32 inRelativeVolume);
-    
-    // Returns true if a client for PID inAppPID was found and its pan position changed.
-    bool                                                SetClientsPanPosition(pid_t inAppPID, SInt32 inPanPosition);
-    // Returns true if a client for bundle ID inAppBundleID was found and its pan position changed.
-    bool                                                SetClientsPanPosition(CACFString inAppBundleID, SInt32 inPanPosition);
-    
     void                                                StartIONonRT(UInt32 inClientID) { UpdateClientIOStateNonRT(inClientID, true); }
     void                                                StopIONonRT(UInt32 inClientID) { UpdateClientIOStateNonRT(inClientID, false); }
     
@@ -150,11 +119,6 @@ private:
     // Note that this method is called by NovaLINK_TaskQueue through the NovaLINK_ClientTasks interface. The shadow maps
     // mutex must be locked when calling this method.
     void                                                SwapInShadowMapsRT();
-    
-    // Client lookup for PID inAppPID
-    std::vector<NovaLINK_Client*> * _Nullable                GetClients(pid_t inAppPid);
-    // Client lookup for bundle ID inAppBundleID
-    std::vector<NovaLINK_Client*> * _Nullable                GetClients(CACFString inAppBundleID);
     
 private:
     NovaLINK_TaskQueue*                                      mTaskQueue;
@@ -191,4 +155,3 @@ private:
 #pragma clang assume_nonnull end
 
 #endif /* __NovaLINKDriver__NovaLINK_ClientMap__ */
-
