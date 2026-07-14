@@ -53,6 +53,9 @@ cp -R "${ROOT}/build/DerivedData-App/Build/Products/${CONFIG}/NovaLINK Audio Pas
 cp -R "${ROOT}/build/DerivedData-App/Build/Products/${CONFIG}/NovaLINKXPCHelper.xpc" \
   "${OUT_DIR}/"
 
+# Drop debug symbols from distributable companion (package size + cleaner install).
+rm -rf "${OUT_DIR}/NovaLINK Audio Passthrough.app/Contents/MacOS/"*.dSYM
+
 # Bind Info.plist + entitlements so TCC microphone grants stick (linker-signed
 # binaries leave Info.plist unbound and re-prompt on every launch / relaunch).
 PASSTHROUGH_APP="${OUT_DIR}/NovaLINK Audio Passthrough.app"
