@@ -1146,43 +1146,42 @@ void	NovaLINK_Device::StartIO(UInt32 inClientID)
         novaLINKAppHasClientRegistered = mClients.NovaLINKAppHasClientRegistered();
     }
     
-    // We only return from StartIO after NovaLINKApp is ready to pass the audio through to the output device. That way
-    // the HAL doesn't start sending us data before NovaLINKApp can play it, which would mean we'd have to either drop
-    // frames or increase latency.
+    // Request that NovaLINKApp start playthrough. On modern macOS we must not block StartIO waiting
+    // for the real output device — that deadlocks with the HAL and freezes clients (Chrome/YouTube).
+    // NovaLINKApp starts playthrough asynchronously (see startPlayThroughSync ReturningEarly path).
     if(!clientIsNovaLINKApp && novaLINKAppHasClientRegistered)
     {
-        DebugMsg("NovaLINK_Device::StartIO: StartNovaLINKAppPlayThroughSync.");
-        UInt64 theXPCError = StartNovaLINKAppPlayThroughSync(GetObjectID() == kObjectID_Device_UI_Sounds);
-        
-        switch(theXPCError)
-        {
-            case kNovaLINKXPC_Success:
-                DebugMsg("NovaLINK_Device::StartIO: Ready for IO.");
-                break;
-        
-            case kNovaLINKXPC_MessageFailure:
-                // This most likely means NovaLINKXPCHelper isn't installed or has crashed. IO will probably still work,
-                // but we may drop frames while the audio hardware starts up.
-                LogWarning("NovaLINK_Device::StartIO: Couldn't reach NovaLINKApp via XPC. Attempting to start IO anyway.");
-                break;
-                       
-           case kNovaLINKXPC_Timeout:
-               // XPC timeout. IO will probably still work,
-               // but we may drop frames while the audio hardware starts up.
-               LogWarning("NovaLINK_Device::StartIO: Couldn't reach NovaLINKApp via XPC (timeout). Attempting to start IO anyway.");
-               break;
+        DebugMsg("NovaLINK_Device::StartIO: Requesting playthrough start (non-blocking).");
+        const bool forUISoundsDevice = (GetObjectID() == kObjectID_Device_UI_Sounds);
+        // Run the XPC round-trip off the StartIO stack so the HAL can finish client StartIO
+        // immediately. Dropped initial frames are preferable to a hung Chrome/YouTube tab.
+        CADispatchQueue::GetGlobalSerialQueue().Dispatch(false, ^{
+            UInt64 theXPCError = StartNovaLINKAppPlayThroughSync(forUISoundsDevice);
 
-            case kNovaLINKXPC_ReturningEarlyError:
-                // This can (and might always) happen when the user changes output device in NovaLINKApp while IO is running.
-                // See NovaLINKAudioDeviceManager::startPlayThroughSync and NovaLINKPlayThrough::WaitForOutputDeviceToStart.
-                LogWarning("NovaLINK_Device::StartIO: NovaLINKApp was busy, so NovaLINKDriver has to return from StartIO early.");
-                break;
-                
-            default:
-                DebugMsg("NovaLINK_Device::StartIO: NovaLINKApp failed to start the output device. theXPCError=%llu", theXPCError);
-                LogError("NovaLINK_Device::StartIO: NovaLINKApp failed to start the output device. theXPCError=%llu", theXPCError);
-                //Throw(CAException(kAudioHardwareNotRunningError));
-        }
+            switch(theXPCError)
+            {
+                case kNovaLINKXPC_Success:
+                    DebugMsg("NovaLINK_Device::StartIO: Playthrough ready.");
+                    break;
+
+                case kNovaLINKXPC_MessageFailure:
+                    LogWarning("NovaLINK_Device::StartIO: Couldn't reach NovaLINKApp via XPC.");
+                    break;
+
+                case kNovaLINKXPC_Timeout:
+                    LogWarning("NovaLINK_Device::StartIO: Timed out waiting for NovaLINKApp via XPC.");
+                    break;
+
+                case kNovaLINKXPC_ReturningEarlyError:
+                    DebugMsg("NovaLINK_Device::StartIO: NovaLINKApp returned early (async start).");
+                    break;
+
+                default:
+                    LogError("NovaLINK_Device::StartIO: NovaLINKApp failed to start the output device. theXPCError=%llu",
+                             theXPCError);
+                    break;
+            }
+        });
     }
 }
 

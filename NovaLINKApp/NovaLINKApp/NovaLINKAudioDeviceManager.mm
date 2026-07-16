@@ -375,7 +375,9 @@
             isBigSur = YES;
         }
 
-        // Always start playthrough asynchronously. Temp workaround for deadlock on Big Sur.
+        // Always start playthrough asynchronously on macOS 11+. Temp workaround for deadlock on Big Sur+:
+        // CoreAudio blocks App HAL calls until the driver's StartIO returns, so we cannot wait for the
+        // real output device here. See Background Music #328.
         if (!isBigSur && gotLock) {
             NovaLINKPlayThrough& pt = (forUISoundsDevice ? playThrough_UISounds : playThrough);
 
@@ -394,16 +396,26 @@
             err = pt.WaitForOutputDeviceToStart();
             NovaLINKAssert(err != NovaLINKPlayThrough::kDeviceNotStarting, "Playthrough didn't start");
         } else {
-            LogWarning("NovaLINKAudioDeviceManager::startPlayThroughSync: Didn't get state lock. Returning "
-                       "early with kNovaLINKErrorCode_ReturningEarly.");
+            if (!gotLock) {
+                LogWarning("NovaLINKAudioDeviceManager::startPlayThroughSync: Didn't get state lock. "
+                           "Returning early with kNovaLINKErrorCode_ReturningEarly.");
+            } else {
+                DebugMsg("NovaLINKAudioDeviceManager::startPlayThroughSync: Starting playthrough "
+                         "asynchronously (macOS 11+ deadlock workaround).");
+            }
             err = kNovaLINKErrorCode_ReturningEarly;
 
-            dispatch_async(NovaLINKGetDispatchQueue_PriorityUserInteractive(), ^{
+            // Defer Start until after the client's StartIO has returned from the HAL. Starting
+            // playthrough IOProcs in the same turn races with HAL StartIO completion and can
+            // deadlock — especially when the real output is Bluetooth (slow StartIOProc).
+            constexpr int64_t kStartPlayThroughDeferNsec = 50 * NSEC_PER_MSEC;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, kStartPlayThroughDeferNsec),
+                           NovaLINKGetDispatchQueue_PriorityUserInteractive(), ^{
                 @try {
                     [stateLock lock];
 
                     NovaLINKPlayThrough& pt = (forUISoundsDevice ? playThrough_UISounds : playThrough);
-                    
+
                     NovaLINKLogAndSwallowExceptionsMsg("NovaLINKAudioDeviceManager::startPlayThroughSync",
                                                   "Starting playthrough (dispatched)", [&] {
                         pt.Start();

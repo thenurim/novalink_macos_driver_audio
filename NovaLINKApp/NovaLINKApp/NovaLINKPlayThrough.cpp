@@ -252,8 +252,9 @@ void    NovaLINKPlayThrough::AllocateBuffer()
     //
     // TODO: Test playthrough with hardware with more than 2 channels per frame, a sample (virtual) format other than
     //       32-bit floats and/or an IO buffer size other than 512 frames
-    // Smaller multiplier than Apple's CAPlayThrough sample (20) for lower passthrough latency.
-    static const UInt32 kRingBufferFrameMultiplier = 8;
+    // Match Apple's CAPlayThrough multiplier (20). A smaller buffer (e.g. 8) underflows easily with
+    // Bluetooth/AirPlay clock drift and device start latency.
+    static const UInt32 kRingBufferFrameMultiplier = 20;
     mBuffer->Allocate(outputFormat[0].mChannelsPerFrame,
                       outputFormat[0].mBytesPerFrame,
                       mOutputDevice.GetIOBufferSize() * kRingBufferFrameMultiplier);
@@ -404,29 +405,35 @@ bool    NovaLINKPlayThrough::CheckIOProcsAreStopped() const noexcept
 void    NovaLINKPlayThrough::SetDevices(const NovaLINKAudioDevice* __nullable inInputDevice,
                                    const NovaLINKAudioDevice* __nullable inOutputDevice)
 {
-    CAMutex::Locker stateLocker(mStateMutex);
-    
-    bool wasActive = mActive;
-    bool wasPlayingThrough = mPlayingThrough;
-    
-    if(wasPlayingThrough)
+    bool wasActive;
+    bool wasPlayingThrough;
+
     {
-        NovaLINKAssert(wasActive, "NovaLINKPlayThrough::SetOutputDevice: wasPlayingThrough && !wasActive");  // Sanity check.
+        CAMutex::Locker stateLocker(mStateMutex);
+
+        wasActive = mActive;
+        wasPlayingThrough = mPlayingThrough;
+
+        if(wasPlayingThrough)
+        {
+            NovaLINKAssert(wasActive, "NovaLINKPlayThrough::SetOutputDevice: wasPlayingThrough && !wasActive");  // Sanity check.
+        }
+
+        Deactivate();
+
+        mInputDevice = inInputDevice ? *inInputDevice : mInputDevice;
+        mOutputDevice = inOutputDevice ? *inOutputDevice : mOutputDevice;
+
+        // Resize and reallocate the buffer if necessary.
+        Init(mInputDevice, mOutputDevice);
+
+        if(wasActive)
+        {
+            Activate();
+        }
     }
-    
-    Deactivate();
-    
-    mInputDevice = inInputDevice ? *inInputDevice : mInputDevice;
-    mOutputDevice = inOutputDevice ? *inOutputDevice : mOutputDevice;
-    
-    // Resize and reallocate the buffer if necessary.
-    Init(mInputDevice, mOutputDevice);
-    
-    if(wasActive)
-    {
-        Activate();
-    }
-    
+
+    // Start outside the state lock — StartIOProc must not run while mStateMutex is held.
     if(wasPlayingThrough)
     {
         Start();
@@ -437,67 +444,118 @@ void    NovaLINKPlayThrough::SetDevices(const NovaLINKAudioDevice* __nullable in
 
 void    NovaLINKPlayThrough::Start()
 {
-    CAMutex::Locker stateLocker(mStateMutex);
-    
-    if(mPlayingThrough)
-    {
-        DebugMsg("NovaLINKPlayThrough::Start: Already started/starting.");
+    AudioDeviceIOProcID inputProcID = nullptr;
+    AudioDeviceIOProcID outputProcID = nullptr;
+    bool restartAfterPartialStop = false;
 
-        if(mOutputDeviceIOProcState == IOState::Running)
+    // Prepare under the state lock, but do not call StartIOProc while holding it. StartIOProc can
+    // block for a long time (Bluetooth) and can re-enter the HAL while a client StartIO on
+    // NovaLINKDevice is still unwinding — holding mStateMutex across that widens the deadlock window.
+    {
+        CAMutex::Locker stateLocker(mStateMutex);
+
+        if(mPlayingThrough)
         {
-            ReleaseThreadsWaitingForOutputToStart();
+            const IOState outputState = mOutputDeviceIOProcState;
+            const IOState inputState = mInputDeviceIOProcState;
+
+            // Healthy playthrough — nothing to do.
+            if(outputState == IOState::Running && inputState == IOState::Running)
+            {
+                DebugMsg("NovaLINKPlayThrough::Start: Already running.");
+                ReleaseThreadsWaitingForOutputToStart();
+                return;
+            }
+
+            // StartIOProc still in flight on another thread.
+            if(outputState == IOState::Starting || inputState == IOState::Starting)
+            {
+                DebugMsg("NovaLINKPlayThrough::Start: Already starting.");
+                return;
+            }
+
+            // Classic failure mode with Bluetooth: StopIfIdle / BT idle suspend leaves
+            // mPlayingThrough true and the NovaLINK input IOProc alive, but the real output
+            // IOProc is dead. A naive early-return then leaves Chrome/YouTube writing into a
+            // black hole. Tear down and restart.
+            LogWarning("NovaLINKPlayThrough::Start: Playthrough marked active but IOProcs are "
+                       "not running (input=%d output=%d). Restarting.",
+                       (int)inputState,
+                       (int)outputState);
+            restartAfterPartialStop = true;
         }
 
+        if(!restartAfterPartialStop)
+        {
+            if(!mInputDevice.IsAlive() || !mOutputDevice.IsAlive())
+            {
+                LogError("NovaLINKPlayThrough::Start: %s %s",
+                         mInputDevice.IsAlive() ? "" : "!mInputDevice",
+                         mOutputDevice.IsAlive() ? "" : "!mOutputDevice");
+
+                ReleaseThreadsWaitingForOutputToStart();
+
+                throw CAException(kAudioHardwareBadDeviceError);
+            }
+
+            // Set up IOProcs and listeners if they haven't been already.
+            Activate();
+
+            NovaLINKAssert((mInputDeviceIOProcID != nullptr) && (mOutputDeviceIOProcID != nullptr),
+                      "NovaLINKPlayThrough::Start: Null IOProc ID");
+
+            if((mInputDeviceIOProcState != IOState::Stopped) || (mOutputDeviceIOProcState != IOState::Stopped))
+            {
+                LogWarning("NovaLINKPlayThrough::Start: IOProc(s) not ready. Trying to start anyway. %s%d %s%d",
+                           "mInputDeviceIOProcState = ", mInputDeviceIOProcState.load(),
+                           "mOutputDeviceIOProcState = ", mOutputDeviceIOProcState.load());
+            }
+
+            DebugMsg("NovaLINKPlayThrough::Start: Starting playthrough");
+
+            mOutputDeviceIOProcState = IOState::Starting;
+            mInputDeviceIOProcState = IOState::Starting;
+            // Claim playthrough before releasing the lock so a concurrent Start() returns early.
+            mPlayingThrough = true;
+
+            inputProcID = mInputDeviceIOProcID;
+            outputProcID = mOutputDeviceIOProcID;
+        }
+    }
+
+    if(restartAfterPartialStop)
+    {
+        Stop();
+        Start();
         return;
     }
-    
-    if(!mInputDevice.IsAlive() || !mOutputDevice.IsAlive())
-    {
-        LogError("NovaLINKPlayThrough::Start: %s %s",
-                 mInputDevice.IsAlive() ? "" : "!mInputDevice",
-                 mOutputDevice.IsAlive() ? "" : "!mOutputDevice");
-        
-        ReleaseThreadsWaitingForOutputToStart();
-        
-        throw CAException(kAudioHardwareBadDeviceError);
-    }
-    
-    // Set up IOProcs and listeners if they haven't been already.
-    Activate();
-    
-    NovaLINKAssert((mInputDeviceIOProcID != nullptr) && (mOutputDeviceIOProcID != nullptr),
-              "NovaLINKPlayThrough::Start: Null IOProc ID");
-    
-    if((mInputDeviceIOProcState != IOState::Stopped) || (mOutputDeviceIOProcState != IOState::Stopped))
-    {
-        LogWarning("NovaLINKPlayThrough::Start: IOProc(s) not ready. Trying to start anyway. %s%d %s%d",
-                   "mInputDeviceIOProcState = ", mInputDeviceIOProcState.load(),
-                   "mOutputDeviceIOProcState = ", mOutputDeviceIOProcState.load());
-    }
-    
-    DebugMsg("NovaLINKPlayThrough::Start: Starting playthrough");
-    
-    // Start our IOProcs.
+
+    // Start the real output device first, then NovaLINK input.
+    //
+    // Starting NovaLINK (input) first nests another StartIO on the virtual device while a client
+    // app's StartIO may still be finishing in the HAL. On modern macOS that deadlocks; Bluetooth
+    // outputs make it much more likely because their StartIOProc is slow and the race window is wide.
+    const char* failedDevice = "output";
     try
     {
-        mInputDeviceIOProcState = IOState::Starting;
-        mInputDevice.StartIOProc(mInputDeviceIOProcID);
-    
-        mOutputDeviceIOProcState = IOState::Starting;
-        mOutputDevice.StartIOProc(mOutputDeviceIOProcID);
+        mOutputDevice.StartIOProc(outputProcID);
+
+        failedDevice = "input";
+        mInputDevice.StartIOProc(inputProcID);
     }
     catch(CAException e)
     {
+        CAMutex::Locker stateLocker(mStateMutex);
+
         ReleaseThreadsWaitingForOutputToStart();
-        
-        // Log an error message.
+
         OSStatus err = e.GetError();
         char err4CC[5] = CA4CCToCString(err);
         LogError("NovaLINKPlayThrough::Start: Failed to start %s device. Error: %d (%s)",
-                 (mOutputDeviceIOProcState == IOState::Starting ? "output" : "input"),
+                 failedDevice,
                  err,
                  err4CC);
-        
+
         // Try to stop the IOProcs in case StartIOProc failed because one of our IOProc was already
         // running. I don't know if it actually does fail in that case, but the documentation
         // doesn't say so it's safer to assume it could.
@@ -507,14 +565,13 @@ void    NovaLINKPlayThrough::Start()
         CATry
         mOutputDevice.StopIOProc(mOutputDeviceIOProcID);
         CACatch
-        
+
         mInputDeviceIOProcState = IOState::Stopped;
         mOutputDeviceIOProcState = IOState::Stopped;
-        
+        mPlayingThrough = false;
+
         throw;
     }
-    
-    mPlayingThrough = true;
 }
 
 OSStatus    NovaLINKPlayThrough::WaitForOutputDeviceToStart() noexcept
@@ -881,14 +938,18 @@ void    NovaLINKPlayThrough::HandleNovaLINKDeviceIsRunning(NovaLINKPlayThrough* 
     // TODO: We should find a way to do this without dispatching because dispatching isn't actually
     //       real-time safe.
     dispatch_async(NovaLINKGetDispatchQueue_PriorityUserInteractive(), ^{
-        if(refCon->mActive)
+        if(!refCon->mActive)
+        {
+            return;
+        }
+
+        // Set to true initially because if we fail to get this property from NovaLINKDevice we want to
+        // try to start playthrough anyway.
+        bool isRunningSomewhereOtherThanNovaLINKApp = true;
+
         {
             CAMutex::Locker stateLocker(refCon->mStateMutex);
-            
-            // Set to true initially because if we fail to get this property from NovaLINKDevice we want to
-            // try to start playthrough anyway.
-            bool isRunningSomewhereOtherThanNovaLINKApp = true;
-            
+
             NovaLINKLogAndSwallowExceptions("HandleNovaLINKDeviceIsRunning", [&]() {
                 // IsRunning doesn't always return true when IO is starting. Using
                 // RunningSomewhereOtherThanNovaLINKApp instead seems to be working so far.
@@ -899,20 +960,24 @@ void    NovaLINKPlayThrough::HandleNovaLINKDeviceIsRunning(NovaLINKPlayThrough* 
             DebugMsg("NovaLINKPlayThrough::HandleNovaLINKDeviceIsRunning: "
                      "NovaLINKDevice is %srunning somewhere other than NovaLINKApp",
                      isRunningSomewhereOtherThanNovaLINKApp ? "" : " not");
-            
+
             if(isRunningSomewhereOtherThanNovaLINKApp)
             {
                 refCon->mToldOutputDeviceToStartAt = mach_absolute_time();
-
-                // TODO: Handle expected exceptions (mostly CAExceptions from PublicUtility classes) in Start.
-                //       For any that can't be handled sensibly in Start, catch them here and retry a few
-                //       times (with a very short delay) before handling them by showing an unobtrusive error
-                //       message or something. Then try a different device or just set the system device back
-                //       to the real device.
-                NovaLINKLogAndSwallowExceptions("HandleNovaLINKDeviceIsRunning", [&refCon]() {
-                    refCon->Start();
-                });
             }
+        }
+
+        // Start outside the state lock — StartIOProc must not run while mStateMutex is held.
+        if(isRunningSomewhereOtherThanNovaLINKApp)
+        {
+            // TODO: Handle expected exceptions (mostly CAExceptions from PublicUtility classes) in Start.
+            //       For any that can't be handled sensibly in Start, catch them here and retry a few
+            //       times (with a very short delay) before handling them by showing an unobtrusive error
+            //       message or something. Then try a different device or just set the system device back
+            //       to the real device.
+            NovaLINKLogAndSwallowExceptions("HandleNovaLINKDeviceIsRunning", [&refCon]() {
+                refCon->Start();
+            });
         }
     });
 }
