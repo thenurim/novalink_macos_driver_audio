@@ -118,6 +118,12 @@ public:
     // Blocks until the output device has started our IOProc. Returns one of the error constants
     // from AudioHardwareBase.h (e.g. kAudioHardwareNoError).
     OSStatus            WaitForOutputDeviceToStart() noexcept;
+
+    /*!
+     @return True if a client other than NovaLINKApp is currently doing IO on the input (NovaLINK) device.
+     @throws CAException
+     */
+    bool                ClientsArePlaying() const;
     
 private:
     /*! Real-time safe. */
@@ -211,6 +217,13 @@ private:
     bool                mPlayingThrough = false;
 
     UInt64              mLastNotifiedIOStoppedOnNovaLINKDevice { 0 };
+
+    // After Start() (especially device switches), Chrome/etc. often drop IO briefly while
+    // sample rate/buffers renegotiate. StopIfIdle must not kill playthrough during that gap.
+    // We only arm idle-stop after we've observed a non-App client doing IO at least once
+    // since the last Start(); until then (or until the safety deadline) StopIfIdle is a no-op.
+    bool                mIdleStopArmed { true };
+    UInt64              mIdleStopArmDeadlineHostTime { 0 };
 
     std::atomic<IOState>    mInputDeviceIOProcState { IOState::Stopped };
     std::atomic<IOState>    mOutputDeviceIOProcState { IOState::Stopped };

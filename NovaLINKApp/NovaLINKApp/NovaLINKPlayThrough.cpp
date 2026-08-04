@@ -33,6 +33,7 @@
 
 // STL Includes
 #include <algorithm>  // For std::max
+#include <cmath>
 
 // System Includes
 #include <mach/mach_init.h>
@@ -124,13 +125,52 @@ void    NovaLINKPlayThrough::Activate()
         
         mActive = true;
         
-        // TODO: This code (the next two blocks) should be in NovaLINKDeviceControlSync.
-        
-        // Set NovaLINKDevice's sample rate to match the output device.
+        // Prefer keeping NovaLINK's sample rate/buffer stable while other apps (Chrome, etc.) are
+        // playing through it. Changing NovaLINK mid-stream makes the client audio clock jump, which
+        // shows up as YouTube playing in slow-motion then suddenly catching up after the next
+        // device switch. Try to drive the real output at NovaLINK's rate first; only change NovaLINK
+        // when the output can't follow.
+        const bool clientsPlaying = [&]() -> bool {
+            try {
+                return mInputDevice.IsNovaLINKDeviceInstance()
+                        && IsRunningSomewhereOtherThanNovaLINKApp(mInputDevice);
+            } catch (...) {
+                return false;
+            }
+        }();
+
         try
         {
             Float64 outputSampleRate = mOutputDevice.GetNominalSampleRate();
-            mInputDevice.SetNominalSampleRate(outputSampleRate);
+            Float64 inputSampleRate = mInputDevice.GetNominalSampleRate();
+
+            if(std::fabs(outputSampleRate - inputSampleRate) > 0.5)
+            {
+                if(clientsPlaying)
+                {
+                    try
+                    {
+                        DebugMsg("NovaLINKPlayThrough::Activate: Clients playing — matching output "
+                                 "sample rate (%.0f) to NovaLINK (%.0f)",
+                                 outputSampleRate,
+                                 inputSampleRate);
+                        mOutputDevice.SetNominalSampleRate(inputSampleRate);
+                    }
+                    catch (CAException e)
+                    {
+                        LogWarning("NovaLINKPlayThrough::Activate: Output rejected NovaLINK sample "
+                                   "rate %f (err %d); matching NovaLINK to output %f instead",
+                                   inputSampleRate,
+                                   e.GetError(),
+                                   outputSampleRate);
+                        mInputDevice.SetNominalSampleRate(outputSampleRate);
+                    }
+                }
+                else
+                {
+                    mInputDevice.SetNominalSampleRate(outputSampleRate);
+                }
+            }
         }
         catch (CAException e)
         {
@@ -138,11 +178,35 @@ void    NovaLINKPlayThrough::Activate()
                        e.GetError());
         }
         
-        // Set NovaLINKDevice's IO buffer size to match the output device.
+        // Same policy for IO buffer size.
         try
         {
             UInt32 outputBufferSize = mOutputDevice.GetIOBufferSize();
-            mInputDevice.SetIOBufferSize(outputBufferSize);
+            UInt32 inputBufferSize = mInputDevice.GetIOBufferSize();
+
+            if(outputBufferSize != inputBufferSize)
+            {
+                if(clientsPlaying)
+                {
+                    try
+                    {
+                        mOutputDevice.SetIOBufferSize(inputBufferSize);
+                    }
+                    catch (CAException e)
+                    {
+                        LogWarning("NovaLINKPlayThrough::Activate: Output rejected NovaLINK buffer "
+                                   "size %u (err %d); matching NovaLINK to output %u instead",
+                                   inputBufferSize,
+                                   e.GetError(),
+                                   outputBufferSize);
+                        mInputDevice.SetIOBufferSize(outputBufferSize);
+                    }
+                }
+                else
+                {
+                    mInputDevice.SetIOBufferSize(outputBufferSize);
+                }
+            }
         }
         catch (CAException e)
         {
@@ -463,6 +527,14 @@ void    NovaLINKPlayThrough::Start()
             if(outputState == IOState::Running && inputState == IOState::Running)
             {
                 DebugMsg("NovaLINKPlayThrough::Start: Already running.");
+                // If a non-App client is already playing, arm idle-stop so we can stop later
+                // when they leave. (Start normally disarms idle-stop for device-switch races.)
+                NovaLINKLogAndSwallowExceptions("NovaLINKPlayThrough::Start", [&] {
+                    if(IsRunningSomewhereOtherThanNovaLINKApp(mInputDevice))
+                    {
+                        mIdleStopArmed = true;
+                    }
+                });
                 ReleaseThreadsWaitingForOutputToStart();
                 return;
             }
@@ -517,6 +589,19 @@ void    NovaLINKPlayThrough::Start()
             mInputDeviceIOProcState = IOState::Starting;
             // Claim playthrough before releasing the lock so a concurrent Start() returns early.
             mPlayingThrough = true;
+            // Cancel any StopIfIdle scheduled before this Start (device-switch / XPC races).
+            mLastNotifiedIOStoppedOnNovaLINKDevice = mach_absolute_time();
+            // Disarm idle-stop until a non-App client is seen playing again (or deadline).
+            mIdleStopArmed = false;
+            {
+                mach_timebase_info_data_t info{};
+                mach_timebase_info(&info);
+                const UInt64 graceNsec = 60ULL * NSEC_PER_SEC;
+                const UInt64 graceTicks =
+                        (info.denom == 0) ? graceNsec
+                                          : (graceNsec * info.denom) / info.numer;
+                mIdleStopArmDeadlineHostTime = mach_absolute_time() + graceTicks;
+            }
 
             inputProcID = mInputDeviceIOProcID;
             outputProcID = mOutputDeviceIOProcID;
@@ -572,6 +657,11 @@ void    NovaLINKPlayThrough::Start()
 
         throw;
     }
+}
+
+bool    NovaLINKPlayThrough::ClientsArePlaying() const
+{
+    return IsRunningSomewhereOtherThanNovaLINKApp(mInputDevice);
 }
 
 OSStatus    NovaLINKPlayThrough::WaitForOutputDeviceToStart() noexcept
@@ -821,6 +911,34 @@ void    NovaLINKPlayThrough::StopIfIdle()
     
     NovaLINKAssert(mInputDevice.IsNovaLINKDeviceInstance(),
               "NovaLINKDevice not set as input device. StopIfIdle can't tell if other devices are idle.");
+
+    // After Start()/device switch, non-App clients often drop IO briefly. Do not stop until we've
+    // seen them playing again (or the safety deadline passes with still nobody playing).
+    if(!mIdleStopArmed)
+    {
+        bool clientsPlaying = false;
+        NovaLINKLogAndSwallowExceptions("NovaLINKPlayThrough::StopIfIdle", [&] {
+            clientsPlaying = IsRunningSomewhereOtherThanNovaLINKApp(mInputDevice);
+        });
+
+        if(clientsPlaying)
+        {
+            DebugMsg("NovaLINKPlayThrough::StopIfIdle: Arming idle-stop (non-App client playing).");
+            mIdleStopArmed = true;
+            // Fall through — if they're playing we won't schedule a stop below anyway.
+        }
+        else if(mach_absolute_time() < mIdleStopArmDeadlineHostTime)
+        {
+            DebugMsg("NovaLINKPlayThrough::StopIfIdle: Suppressed (waiting for non-App client after Start).");
+            return;
+        }
+        else
+        {
+            // Deadline expired and still idle — allow the normal idle-stop path.
+            DebugMsg("NovaLINKPlayThrough::StopIfIdle: Arm deadline expired with no non-App client.");
+            mIdleStopArmed = true;
+        }
+    }
     
     if(!IsRunningSomewhereOtherThanNovaLINKApp(mInputDevice))
     {
@@ -854,6 +972,7 @@ void    NovaLINKPlayThrough::StopIfIdle()
                                // kAudioDeviceCustomPropertyDeviceIsRunningSomewhereOtherThanNovaLINKApp has changed since
                                // this block was queued
                                if(mPlayingThrough
+                                  && mIdleStopArmed
                                   && !IsRunningSomewhereOtherThanNovaLINKApp(mInputDevice)
                                   && queuedAt == mLastNotifiedIOStoppedOnNovaLINKDevice)
                                {
@@ -977,6 +1096,11 @@ void    NovaLINKPlayThrough::HandleNovaLINKDeviceIsRunning(NovaLINKPlayThrough* 
             //       to the real device.
             NovaLINKLogAndSwallowExceptions("HandleNovaLINKDeviceIsRunning", [&refCon]() {
                 refCon->Start();
+            });
+            // Ensure idle-stop is armed now that we know a non-App client is running.
+            NovaLINKLogAndSwallowExceptions("HandleNovaLINKDeviceIsRunning", [&refCon]() {
+                CAMutex::Locker stateLocker(refCon->mStateMutex);
+                refCon->mIdleStopArmed = true;
             });
         }
     });

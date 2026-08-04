@@ -250,7 +250,15 @@
 - (void) setOutputDeviceWithIDImpl:(AudioObjectID)newDeviceID
                       dataSourceID:(UInt32* __nullable)dataSourceID
                    currentDeviceID:(AudioObjectID)currentDeviceID {
+    // Snapshot before we tear playthrough down / change NovaLINK's sample rate. Config changes
+    // can make Chrome briefly drop IO, so a post-switch StopIfIdle would race and kill the new
+    // output path while YouTube is still intended to be playing.
+    BOOL clientsPlaying = NO;
     if (newDeviceID != currentDeviceID) {
+        NovaLINKLogAndSwallowExceptions("NovaLINKAudioDeviceManager::setOutputDeviceWithIDImpl", [&] {
+            clientsPlaying = playThrough.ClientsArePlaying() || playThrough_UISounds.ClientsArePlaying();
+        });
+
         NovaLINKAudioDevice newOutputDevice(newDeviceID);
         [self setOutputDeviceForPlaythroughAndControlSync:newOutputDevice];
         outputDevice = newOutputDevice;
@@ -267,11 +275,41 @@
         // We successfully changed to the new device. Start playthrough on it, since audio might be
         // playing. (If we only changed the data source, playthrough will already be running if it
         // needs to be.)
+        //
+        // Do not call StopIfIdle here. Device switches interrupt Chrome's IO; an idle-stop would
+        // tear down playthrough while audio is supposed to keep flowing. StopIfIdle is armed again
+        // only after a non-App client is observed playing (see NovaLINKPlayThrough::StopIfIdle).
         playThrough.Start();
         playThrough_UISounds.Start();
-        // But stop playthrough if audio isn't playing, since it uses CPU.
-        playThrough.StopIfIdle();
-        playThrough_UISounds.StopIfIdle();
+        // If Chrome (etc.) never dropped IO across the switch, this arms idle-stop without
+        // stopping. If they did drop, StopIfIdle stays suppressed until they return.
+        NovaLINKLogAndSwallowExceptions("NovaLINKAudioDeviceManager::setOutputDeviceWithIDImpl", [&] {
+            playThrough.StopIfIdle();
+            playThrough_UISounds.StopIfIdle();
+        });
+
+        if (clientsPlaying) {
+            // Clients often restart IO after NovaLINK's sample rate/buffer change — nudge Start.
+            auto restartPlaythrough = ^{
+                @try {
+                    [stateLock lock];
+                    NovaLINKLogAndSwallowExceptions("NovaLINKAudioDeviceManager::setOutputDeviceWithIDImpl", [&] {
+                        playThrough.Start();
+                        playThrough_UISounds.Start();
+                        playThrough.StopIfIdle();
+                        playThrough_UISounds.StopIfIdle();
+                    });
+                } @finally {
+                    [stateLock unlock];
+                }
+            };
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
+                           NovaLINKGetDispatchQueue_PriorityUserInteractive(),
+                           restartPlaythrough);
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                           NovaLINKGetDispatchQueue_PriorityUserInteractive(),
+                           restartPlaythrough);
+        }
     }
 
     CFStringRef outputDeviceUID = outputDevice.CopyDeviceUID();
@@ -420,10 +458,8 @@
                                                   "Starting playthrough (dispatched)", [&] {
                         pt.Start();
                     });
-
-                    NovaLINKLogAndSwallowExceptions("NovaLINKAudioDeviceManager::startPlayThroughSync", [&] {
-                        pt.StopIfIdle();
-                    });
+                    // Idle-stop is suppressed inside Start()/StopIfIdle until a non-App client is
+                    // observed again — do not call StopIfIdle here.
                 } @finally {
                     [stateLock unlock];
                 }
