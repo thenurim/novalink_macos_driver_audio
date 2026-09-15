@@ -29,6 +29,7 @@
 #import "NovaLINKAutoPauseMusic.h"
 #import "NovaLINKAutoPauseMenuItem.h"
 #import "NovaLINKDebugLoggingMenuItem.h"
+#import "NovaLINKMicrophoneAccess.h"
 #import "NovaLINKMusicPlayers.h"
 #import "NovaLINKOutputDeviceMenuSection.h"
 #import "NovaLINKPreferencesMenu.h"
@@ -38,9 +39,6 @@
 #import "NovaLINKUserDefaults.h"
 #import "NovaLINKXPCListener.h"
 #import "SystemPreferences.h"
-
-// System Includes
-#import <AVFoundation/AVCaptureDevice.h>
 
 #include <unistd.h>
 
@@ -100,8 +98,9 @@ static NSString* const kPassthroughAgentLabel = @"life.thenurim.novalink.Passthr
     // UI tests.
     if ([NSProcessInfo.processInfo.arguments indexOfObject:kOptShowDockIcon] != NSNotFound) {
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-    } else if (!agentMode) {
-        // Explicit accessory policy helps the status item register with Control Center reliably.
+    } else {
+        // Accessory so the status item registers with Control Center / menu bar. Agent mode still
+        // shows the icon; it only skips stealing the OS default device (see continueLaunch).
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
     }
     
@@ -116,14 +115,13 @@ static NSString* const kPassthroughAgentLabel = @"life.thenurim.novalink.Passthr
     // Stored user settings
     userDefaults = [self createUserDefaults];
 
-    // Agent mode stays menu-bar / dock free and only hosts playthrough until the user opens the app.
-    if (!agentMode) {
-        // Add the status bar item. (The thing you click to show NovaLINKApp's main menu.)
-        statusBarItem = [[NovaLINKStatusBarItem alloc] initWithMenu:self.novaLINKMenu
-                                                  audioDevices:audioDevices
-                                                  userDefaults:userDefaults];
-    } else {
-        NSLog(@"NovaLINKAppDelegate: starting in --agent (background passthrough) mode");
+    // Status bar companion UI (output device menu, prefs). Shown in agent mode too so the
+    // LaunchAgent-hosted process is visible and usable without a separate Finder launch.
+    statusBarItem = [[NovaLINKStatusBarItem alloc] initWithMenu:self.novaLINKMenu
+                                              audioDevices:audioDevices
+                                              userDefaults:userDefaults];
+    if (agentMode) {
+        NSLog(@"NovaLINKAppDelegate: starting in --agent mode (status bar on, OS default unchanged)");
     }
 
     NSDistributedNotificationCenter* center = [NSDistributedNotificationCenter defaultCenter];
@@ -164,56 +162,32 @@ static NSString* const kPassthroughAgentLabel = @"life.thenurim.novalink.Passthr
     // isn't needed.
 #if MAC_OS_X_VERSION_MAX_ALLOWED >= 101400  // MAC_OS_X_VERSION_10_14
     if (@available(macOS 10.14, *)) {
-        // On macOS 10.14+ we need microphone permission for playthrough (virtual input).
-        // requestAccess must run at most once per process — repeated calls (and crash/relaunch
-        // loops with unbound Info.plist signatures) stack identical TCC dialogs.
-        static dispatch_once_t onceToken;
-        dispatch_once(&onceToken, ^{
-            AVAuthorizationStatus micStatus =
-                [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio];
-
-            if (micStatus == AVAuthorizationStatusAuthorized) {
-                [self continueLaunchAfterInputDevicePermissionGranted];
-            } else if (micStatus == AVAuthorizationStatusNotDetermined) {
-                [AVCaptureDevice requestAccessForMediaType:AVMediaTypeAudio
-                                         completionHandler:^(BOOL granted) {
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        if (granted) {
-                            DebugMsg("NovaLINKAppDelegate::applicationDidFinishLaunching: Permission granted");
-                            [self continueLaunchAfterInputDevicePermissionGranted];
-                        } else {
-                            NSLog(@"NovaLINKAppDelegate::applicationDidFinishLaunching: Permission denied");
-                            if (self->agentMode) {
-                                NSLog(@"NovaLINKAppDelegate: agent mode cannot prompt further. "
-                                      "Grant Microphone access to \"NovaLINK Audio Passthrough\" "
-                                      "in System Settings, then relaunch the agent.");
-                                [NSApp terminate:nil];
-                                return;
-                            }
-                            [self showErrorMessage:@"NovaLINK Audio Passthrough needs microphone permission."
-                                   informativeText:@"It uses a virtual microphone to access your system's "
-                                                    "audio.\n\nGrant access in System Settings > Privacy & "
-                                                    "Security > Microphone for \"NovaLINK Audio Passthrough\"."
-                         exitAfterMessageDismissed:YES];
-                        }
-                    });
-                }];
+        // On macOS 10.14+ we need microphone permission for playthrough (virtual input) and
+        // hardware-mic inject. Use a single coalesced prompt — never call requestAccess or
+        // StartIOProc on input devices until this completes.
+        [NovaLINKMicrophoneAccess requestAccessIfNeededWithCompletion:^(BOOL granted) {
+            if (granted) {
+                DebugMsg("NovaLINKAppDelegate::applicationDidFinishLaunching: Permission granted");
             } else {
-                NSLog(@"NovaLINKAppDelegate::applicationDidFinishLaunching: Microphone permission not granted "
-                      "(status=%ld)",
-                      (long)micStatus);
-                if (agentMode) {
-                    NSLog(@"NovaLINKAppDelegate: agent mode requires Microphone permission. Exiting.");
-                    [NSApp terminate:nil];
+                NSLog(@"NovaLINKAppDelegate::applicationDidFinishLaunching: Permission denied");
+                if (self->agentMode) {
+                    // Stay alive with the menu bar so the user can open System Settings.
+                    // Exiting here races KeepAlive and can restart-loop. Input IO stays gated
+                    // until Microphone access is enabled for this binary.
+                    NSLog(@"NovaLINKAppDelegate: grant Microphone access to "
+                          "\"NovaLINK Audio Passthrough\" in System Settings → Privacy & Security "
+                          "→ Microphone, then pick an output device again (or relaunch the agent).");
+                } else {
+                    [self showErrorMessage:@"NovaLINK Audio Passthrough needs microphone permission."
+                           informativeText:@"It uses a virtual microphone to access your system's "
+                                            "audio.\n\nGrant access in System Settings > Privacy & "
+                                            "Security > Microphone for \"NovaLINK Audio Passthrough\"."
+                 exitAfterMessageDismissed:YES];
                     return;
                 }
-                [self showErrorMessage:@"NovaLINK Audio Passthrough needs microphone permission."
-                       informativeText:@"It uses a virtual microphone to access your system's "
-                                        "audio.\n\nGrant access in System Settings > Privacy & "
-                                        "Security > Microphone for \"NovaLINK Audio Passthrough\"."
-             exitAfterMessageDismissed:YES];
             }
-        });
+            [self continueLaunchAfterInputDevicePermissionGranted];
+        }];
     }
     else
 #endif
@@ -247,22 +221,21 @@ static NSString* const kPassthroughAgentLabel = @"life.thenurim.novalink.Passthr
     autoPauseMusic = [[NovaLINKAutoPauseMusic alloc] initWithAudioDevices:audioDevices
                                                         musicPlayers:musicPlayers];
 
-    if (!agentMode) {
-        [self setUpMainMenu];
-    }
+    [self setUpMainMenu];
 
     xpcListener = [[NovaLINKXPCListener alloc] initWithAudioDevices:audioDevices
                                   helperConnectionErrorHandler:^(NSError* error) {
         NSLog(@"NovaLINKAppDelegate::continueLaunchAfterInputDevicePermissionGranted: "
               "(helperConnectionErrorHandler) NovaLINKXPCHelper connection error: %@",
               error);
+        // Agent mode: log only — avoid modal dialogs that the user cannot dismiss easily.
         if (!self->agentMode) {
             [self showXPCHelperErrorMessage:error];
         }
     }];
 
     if (agentMode) {
-        NSLog(@"NovaLINKAppDelegate: agent playthrough host ready (not changing OS default device)");
+        NSLog(@"NovaLINKAppDelegate: agent playthrough host ready (status bar visible, OS default unchanged)");
         // If clients are already writing to NovaLINK (user selected it before the agent
         // finished launching), kick playthrough without waiting for another StartIO/XPC edge.
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
@@ -299,15 +272,15 @@ static NSString* const kPassthroughAgentLabel = @"life.thenurim.novalink.Passthr
     });
 }
 
-// Fallback only: turns a background --agent process into the status-bar companion.
-// Preferred path is QuitAgentForCompanionUI + fresh GUI process (see main.m).
+// Turns a background --agent process into a full companion (sets NovaLINK as OS default).
+// Prefer QuitAgentForCompanionUI + fresh GUI process when opening from Finder (see main.m).
 - (void) promoteAgentToCompanionUI {
     if (quittingForCompanionUIHandoff) {
         return;
     }
 
-    if (!agentMode && statusBarItem) {
-        NSLog(@"NovaLINKAppDelegate: companion UI already visible");
+    if (!agentMode && didSetNovaLINKAsOSDefault && statusBarItem) {
+        NSLog(@"NovaLINKAppDelegate: companion UI already fully active");
         return;
     }
 
@@ -320,7 +293,7 @@ static NSString* const kPassthroughAgentLabel = @"life.thenurim.novalink.Passthr
         return;
     }
 
-    NSLog(@"NovaLINKAppDelegate: promoting agent → companion UI (fallback)");
+    NSLog(@"NovaLINKAppDelegate: promoting agent → full companion (set OS default)");
     agentMode = NO;
     uiPromotedFromAgent = YES;
 
@@ -455,11 +428,9 @@ static NSString* const kPassthroughAgentLabel = @"life.thenurim.novalink.Passthr
         return;
     }
 
-    // If the user quit the companion UI (including an agent promoted to UI), bring the
-    // background LaunchAgent back so NovaLINK keeps passthrough without the UI.
-    if (uiPromotedFromAgent || [NSProcessInfo.processInfo.arguments indexOfObject:kOptAgent] == NSNotFound) {
-        [self schedulePassthroughAgentRelaunch];
-    }
+    // Bring the background LaunchAgent back so passthrough keeps running without the UI
+    // process (covers quitting a Finder-launched companion or an agent that showed the bar).
+    [self schedulePassthroughAgentRelaunch];
 }
 
 - (void) schedulePassthroughAgentRelaunch {

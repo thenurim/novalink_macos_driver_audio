@@ -30,6 +30,7 @@
 #import "NovaLINKDeviceControlSync.h"
 #import "NovaLINKOutputDeviceMenuSection.h"
 #import "NovaLINKPlayThrough.h"
+#import "NovaLINKMicInputMixer.h"
 #import "NovaLINKXPCProtocols.h"
 
 // PublicUtility Includes
@@ -88,6 +89,8 @@
 - (void) dealloc {
     @try {
         [stateLock lock];
+
+        [[NovaLINKMicInputMixer sharedInstance] stop];
 
         if (novaLINKDevice) {
             delete novaLINKDevice;
@@ -340,6 +343,10 @@
     NovaLINKAudioDevice uiSoundsDevice = novaLINKDevice->GetUISoundsNovaLINKDeviceInstance();
     playThrough_UISounds.SetDevices(&uiSoundsDevice, &newOutputDevice);
     playThrough_UISounds.Activate();
+
+    // Keep hardware mic mixed into NovaLINK virtual input for capture clients.
+    // ensureStarted avoids stop/start on every output switch (stacked Microphone TCC).
+    [[NovaLINKMicInputMixer sharedInstance] ensureStarted];
 }
 
 - (void) setDataSource:(UInt32)dataSourceID device:(NovaLINKAudioDevice&)device {

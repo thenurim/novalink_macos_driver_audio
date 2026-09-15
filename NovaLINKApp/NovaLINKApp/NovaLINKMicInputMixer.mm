@@ -1,0 +1,425 @@
+// This file is part of NovaLINK.
+//
+// Captures a real hardware microphone and injects its PCM into NovaLINKDevice so that
+// clients reading the virtual input (Zoom, OBS, …) receive desktop audio + mic mixed.
+// Local playthrough hosts still hear desktop-only (see driver ReadInput mix rules).
+
+// Self Include
+#import "NovaLINKMicInputMixer.h"
+
+// Local Includes
+#import "NovaLINKAudioDevice.h"
+#import "NovaLINKDevice.h"
+#import "NovaLINKMicrophoneAccess.h"
+#import "NovaLINK_Types.h"
+#import "NovaLINK_Utils.h"
+
+// PublicUtility Includes
+#import "CADebugMacros.h"
+#import "CAException.h"
+#import "CAHALAudioSystemObject.h"
+
+// System Includes
+#import <AudioToolbox/AudioToolbox.h>
+#import <algorithm>
+#import <cmath>
+#import <vector>
+
+
+#pragma clang assume_nonnull begin
+
+namespace {
+
+struct ConverterInputContext {
+    const AudioBufferList* srcABL;
+    UInt32 framesRemaining;
+    UInt32 bytesPerFrame;
+    bool provided;
+};
+
+OSStatus ConverterInputProc(AudioConverterRef,
+                            UInt32* ioNumberDataPackets,
+                            AudioBufferList* ioData,
+                            AudioStreamPacketDescription* __nullable* __nullable,
+                            void* inUserData)
+{
+    auto* ctx = static_cast<ConverterInputContext*>(inUserData);
+    if (ctx->provided || ctx->framesRemaining == 0) {
+        *ioNumberDataPackets = 0;
+        return noErr;
+    }
+
+    const UInt32 framesToGive = std::min(*ioNumberDataPackets, ctx->framesRemaining);
+    ioData->mNumberBuffers = 1;
+    ioData->mBuffers[0] = ctx->srcABL->mBuffers[0];
+    ioData->mBuffers[0].mDataByteSize = framesToGive * ctx->bytesPerFrame;
+    *ioNumberDataPackets = framesToGive;
+    ctx->framesRemaining -= framesToGive;
+    ctx->provided = true;
+    return noErr;
+}
+
+AudioStreamBasicDescription StereoFloatFormat(Float64 sampleRate)
+{
+    AudioStreamBasicDescription asbd = {};
+    asbd.mSampleRate = sampleRate;
+    asbd.mFormatID = kAudioFormatLinearPCM;
+    asbd.mFormatFlags =
+            kAudioFormatFlagIsFloat | kAudioFormatFlagsNativeEndian | kAudioFormatFlagIsPacked;
+    asbd.mBytesPerPacket = 8;
+    asbd.mFramesPerPacket = 1;
+    asbd.mBytesPerFrame = 8;
+    asbd.mChannelsPerFrame = 2;
+    asbd.mBitsPerChannel = 32;
+    return asbd;
+}
+
+}  // namespace
+
+@implementation NovaLINKMicInputMixer {
+    NSObject* _lock;
+    BOOL _running;
+    AudioObjectID _micDeviceID;
+    AudioObjectID _novaLINKDeviceID;
+    AudioDeviceIOProcID _ioProcID;
+    AudioConverterRef _converter;
+    AudioStreamBasicDescription _micFormat;
+    AudioStreamBasicDescription _injectFormat;
+    dispatch_queue_t _injectQueue;
+    Float64 _novaLINKSampleRate;
+}
+
++ (instancetype) sharedInstance {
+    static NovaLINKMicInputMixer* instance = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        instance = [[NovaLINKMicInputMixer alloc] init];
+    });
+    return instance;
+}
+
+- (instancetype) init {
+    if ((self = [super init])) {
+        _lock = [NSObject new];
+        _running = NO;
+        _micDeviceID = kAudioObjectUnknown;
+        _novaLINKDeviceID = kAudioObjectUnknown;
+        _ioProcID = nullptr;
+        _converter = nullptr;
+        _novaLINKSampleRate = 44100.0;
+        _injectQueue = dispatch_queue_create("life.thenurim.novalink.MicInject",
+                                             DISPATCH_QUEUE_SERIAL);
+        memset(&_micFormat, 0, sizeof(_micFormat));
+        memset(&_injectFormat, 0, sizeof(_injectFormat));
+    }
+    return self;
+}
+
+- (void) dealloc {
+    [self stop];
+}
+
++ (AudioObjectID) resolveHardwareInputDeviceID {
+    AudioObjectID inputDevice = kAudioObjectUnknown;
+    CAHALAudioSystemObject audioSystem;
+
+    NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+        NovaLINKAudioDevice defaultInput = audioSystem.GetDefaultAudioDevice(true, false);
+        if (defaultInput.GetObjectID() != kAudioObjectUnknown &&
+            !defaultInput.IsNovaLINKDeviceInstance() &&
+            defaultInput.GetNumberStreams(true) > 0) {
+            inputDevice = defaultInput.GetObjectID();
+        }
+    });
+
+    if (inputDevice != kAudioObjectUnknown) {
+        return inputDevice;
+    }
+
+    NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+        UInt32 numDevices = audioSystem.GetNumberAudioDevices();
+        std::vector<AudioObjectID> devices(numDevices);
+        audioSystem.GetAudioDevices(numDevices, devices.data());
+
+        for (UInt32 i = 0; i < numDevices; i++) {
+            NovaLINKAudioDevice device(devices[i]);
+            if (device.IsNovaLINKDeviceInstance() || device.GetNumberStreams(true) == 0) {
+                continue;
+            }
+            inputDevice = devices[i];
+            break;
+        }
+    });
+
+    return inputDevice;
+}
+
+- (BOOL) prepareDevicesLocked {
+    AudioObjectID micID = [NovaLINKMicInputMixer resolveHardwareInputDeviceID];
+    if (micID == kAudioObjectUnknown) {
+        LogError("NovaLINKMicInputMixer: No hardware input device found");
+        return NO;
+    }
+
+    NovaLINKDevice novaLINKDevice;
+    _novaLINKDeviceID = novaLINKDevice.GetObjectID();
+    if (_novaLINKDeviceID == kAudioObjectUnknown) {
+        LogError("NovaLINKMicInputMixer: NovaLINKDevice not found");
+        return NO;
+    }
+
+    NovaLINKAudioDevice micDevice(micID);
+    NovaLINKAudioDevice novaDevice(_novaLINKDeviceID);
+
+    _novaLINKSampleRate = novaDevice.GetNominalSampleRate();
+    _injectFormat = StereoFloatFormat(_novaLINKSampleRate);
+
+    NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+        if (micDevice.IsValidNominalSampleRate(_novaLINKSampleRate) &&
+            micDevice.GetNominalSampleRate() != _novaLINKSampleRate) {
+            micDevice.SetNominalSampleRate(_novaLINKSampleRate);
+        }
+    });
+
+    AudioStreamBasicDescription micFormats[1] = {};
+    UInt32 numFormats = 0;
+    NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+        UInt32 n = 1;
+        micDevice.GetCurrentVirtualFormats(true, n, micFormats);
+        numFormats = n;
+    });
+
+    if (numFormats == 0 || micFormats[0].mChannelsPerFrame == 0 || micFormats[0].mBytesPerFrame == 0) {
+        LogError("NovaLINKMicInputMixer: Could not read mic stream format");
+        return NO;
+    }
+
+    _micFormat = micFormats[0];
+
+    if (_converter) {
+        AudioConverterDispose(_converter);
+        _converter = nullptr;
+    }
+
+    OSStatus err = AudioConverterNew(&_micFormat, &_injectFormat, &_converter);
+    if (err != noErr || !_converter) {
+        LogError("NovaLINKMicInputMixer: AudioConverterNew failed (%d)", (int)err);
+        _converter = nullptr;
+        return NO;
+    }
+
+    _micDeviceID = micID;
+    return YES;
+}
+
+static OSStatus MicInputIOProc(AudioObjectID,
+                               const AudioTimeStamp*,
+                               const AudioBufferList* inInputData,
+                               const AudioTimeStamp*,
+                               AudioBufferList*,
+                               const AudioTimeStamp*,
+                               void* inClientData)
+{
+    NovaLINKMicInputMixer* mixer = (__bridge NovaLINKMicInputMixer*)inClientData;
+    [mixer processInputBuffer:inInputData];
+    return noErr;
+}
+
+- (void) processInputBuffer:(const AudioBufferList* __nullable)inInputData {
+    if (!inInputData || inInputData->mNumberBuffers == 0 || !inInputData->mBuffers[0].mData) {
+        return;
+    }
+
+    const AudioBuffer& srcBuf = inInputData->mBuffers[0];
+    if (srcBuf.mDataByteSize == 0) {
+        return;
+    }
+
+    // Copy off the realtime thread; convert + inject on a serial queue.
+    NSData* rawCopy = [NSData dataWithBytes:srcBuf.mData length:srcBuf.mDataByteSize];
+    const UInt32 srcChannels = srcBuf.mNumberChannels;
+
+    dispatch_async(_injectQueue, ^{
+        [self convertAndInjectRawAudio:rawCopy channelCount:srcChannels];
+    });
+}
+
+- (void) convertAndInjectRawAudio:(NSData*)rawCopy channelCount:(UInt32)srcChannels {
+    AudioConverterRef converter = nullptr;
+    AudioObjectID novaID = kAudioObjectUnknown;
+    AudioStreamBasicDescription micFormat = {};
+    AudioStreamBasicDescription injectFormat = {};
+    Float64 novaRate = 44100.0;
+
+    @synchronized (_lock) {
+        if (!_running || !_converter || rawCopy.length == 0) {
+            return;
+        }
+        converter = _converter;
+        novaID = _novaLINKDeviceID;
+        micFormat = _micFormat;
+        injectFormat = _injectFormat;
+        novaRate = _novaLINKSampleRate;
+    }
+
+    if (micFormat.mBytesPerFrame == 0) {
+        return;
+    }
+
+    const UInt32 srcFrames = (UInt32)(rawCopy.length / micFormat.mBytesPerFrame);
+    if (srcFrames == 0) {
+        return;
+    }
+
+    AudioBufferList srcAbl = {};
+    srcAbl.mNumberBuffers = 1;
+    srcAbl.mBuffers[0].mNumberChannels = srcChannels ? srcChannels : micFormat.mChannelsPerFrame;
+    srcAbl.mBuffers[0].mDataByteSize = (UInt32)rawCopy.length;
+    srcAbl.mBuffers[0].mData = (void*)rawCopy.bytes;
+
+    ConverterInputContext ctx = { &srcAbl, srcFrames, micFormat.mBytesPerFrame, false };
+
+    const Float64 ratio = novaRate / std::max(micFormat.mSampleRate, 1.0);
+    UInt32 dstFramesCapacity = static_cast<UInt32>(std::ceil(ratio * srcFrames)) + 32;
+
+    std::vector<Float32> dstSamples(dstFramesCapacity * injectFormat.mChannelsPerFrame, 0.0f);
+    AudioBufferList dstAbl = {};
+    dstAbl.mNumberBuffers = 1;
+    dstAbl.mBuffers[0].mNumberChannels = injectFormat.mChannelsPerFrame;
+    dstAbl.mBuffers[0].mDataByteSize =
+            static_cast<UInt32>(dstSamples.size() * sizeof(Float32));
+    dstAbl.mBuffers[0].mData = dstSamples.data();
+
+    UInt32 outPackets = dstFramesCapacity;
+    const OSStatus err = AudioConverterFillComplexBuffer(converter,
+                                                         ConverterInputProc,
+                                                         &ctx,
+                                                         &outPackets,
+                                                         &dstAbl,
+                                                         nullptr);
+    if (err != noErr || outPackets == 0) {
+        return;
+    }
+
+    const CFIndex byteCount = static_cast<CFIndex>(outPackets * injectFormat.mBytesPerFrame);
+    CFDataRef data = CFDataCreate(kCFAllocatorDefault,
+                                  reinterpret_cast<const UInt8*>(dstSamples.data()),
+                                  byteCount);
+    if (!data) {
+        return;
+    }
+
+    UInt32 size = sizeof(CFDataRef);
+    AudioObjectSetPropertyData(novaID,
+                               &kNovaLINKInjectMicAudioAddress,
+                               0,
+                               nullptr,
+                               size,
+                               &data);
+    CFRelease(data);
+}
+
+- (void) stopLocked {
+    _running = NO;
+
+    // Drain pending convert/inject work before tearing down the converter.
+    if (_injectQueue) {
+        dispatch_sync(_injectQueue, ^{});
+    }
+
+    if (_ioProcID != nullptr && _micDeviceID != kAudioObjectUnknown) {
+        NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+            NovaLINKAudioDevice micDevice(_micDeviceID);
+            micDevice.StopIOProc(_ioProcID);
+            micDevice.DestroyIOProcID(_ioProcID);
+        });
+        _ioProcID = nullptr;
+    }
+
+    if (_converter) {
+        AudioConverterDispose(_converter);
+        _converter = nullptr;
+    }
+
+    _micDeviceID = kAudioObjectUnknown;
+}
+
+- (BOOL) startLocked {
+    if (![self prepareDevicesLocked]) {
+        return NO;
+    }
+
+    if (![NovaLINKMicrophoneAccess isAuthorized]) {
+        LogWarning("NovaLINKMicInputMixer: Microphone not authorized — skipping input IO start "
+                   "(avoids stacked TCC dialogs)");
+        return NO;
+    }
+
+    try {
+        NovaLINKAudioDevice micDevice(_micDeviceID);
+        _ioProcID = micDevice.CreateIOProcID(MicInputIOProc, (__bridge void*)self);
+        micDevice.StartIOProc(_ioProcID);
+        _running = YES;
+        DebugMsg("NovaLINKMicInputMixer: Started (mic %u → NovaLINK %u @ %.0f Hz)",
+                 _micDeviceID,
+                 _novaLINKDeviceID,
+                 _novaLINKSampleRate);
+        return YES;
+    } catch (const CAException& e) {
+        LogError("NovaLINKMicInputMixer: Failed to start mic IO (%d)", e.GetError());
+        [self stopLocked];
+        return NO;
+    }
+}
+
+- (void) ensureStarted {
+    // Resolve desired config without tearing down an already-good session.
+    AudioObjectID desiredMic = [NovaLINKMicInputMixer resolveHardwareInputDeviceID];
+    Float64 desiredRate = 44100.0;
+    NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+        NovaLINKDevice novaLINKDevice;
+        if (novaLINKDevice.GetObjectID() != kAudioObjectUnknown) {
+            desiredRate = NovaLINKAudioDevice(novaLINKDevice.GetObjectID()).GetNominalSampleRate();
+        }
+    });
+
+    @synchronized (_lock) {
+        if (_running &&
+            _micDeviceID == desiredMic &&
+            desiredMic != kAudioObjectUnknown &&
+            std::fabs(_novaLINKSampleRate - desiredRate) < 0.5) {
+            return;
+        }
+    }
+
+    if (![NovaLINKMicrophoneAccess isAuthorized]) {
+        [NovaLINKMicrophoneAccess requestAccessIfNeededWithCompletion:^(BOOL granted) {
+            if (granted) {
+                [[NovaLINKMicInputMixer sharedInstance] ensureStarted];
+            }
+        }];
+        return;
+    }
+
+    @synchronized (_lock) {
+        if (_running &&
+            _micDeviceID == desiredMic &&
+            desiredMic != kAudioObjectUnknown &&
+            std::fabs(_novaLINKSampleRate - desiredRate) < 0.5) {
+            return;
+        }
+
+        [self stopLocked];
+        [self startLocked];
+    }
+}
+
+- (void) stop {
+    @synchronized (_lock) {
+        [self stopLocked];
+    }
+}
+
+@end
+
+#pragma clang assume_nonnull end

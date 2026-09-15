@@ -115,7 +115,12 @@ enum
     kAudioDeviceCustomPropertyDeviceIsRunningSomewhereOtherThanNovaLINKApp = 'runo',
     // A CFArray of CFBooleans indicating which of NovaLINKDevice's controls are enabled. All controls are enabled
     // by default. This property is settable. See the array indices below for more info.
-    kAudioDeviceCustomPropertyEnabledOutputControls                   = 'bgct'
+    kAudioDeviceCustomPropertyEnabledOutputControls                   = 'bgct',
+    // Settable CFData containing interleaved stereo Float32 PCM at the device sample rate. Used by
+    // NovaLINKApp / XPCHelper to inject hardware-microphone audio into the virtual input mix that
+    // non-passthrough clients (Zoom, OBS, etc.) read. Passthrough hosts still receive desktop-only
+    // loopback so local speakers do not play the mic (feedback).
+    kAudioDeviceCustomPropertyInjectMicAudio                          = 'imic'
 };
 
 // The number of silent/audible frames before NovaLINKDriver will change kAudioDeviceCustomPropertyDeviceAudibleState
@@ -173,6 +178,12 @@ static const AudioObjectPropertyAddress kNovaLINKRunningSomewhereOtherThanNovaLI
 static const AudioObjectPropertyAddress kNovaLINKEnabledOutputControlsAddress = {
     kAudioDeviceCustomPropertyEnabledOutputControls,
     kAudioObjectPropertyScopeOutput,
+    kAudioObjectPropertyElementMaster
+};
+
+static const AudioObjectPropertyAddress kNovaLINKInjectMicAudioAddress = {
+    kAudioDeviceCustomPropertyInjectMicAudio,
+    kAudioObjectPropertyScopeGlobal,
     kAudioObjectPropertyElementMaster
 };
 

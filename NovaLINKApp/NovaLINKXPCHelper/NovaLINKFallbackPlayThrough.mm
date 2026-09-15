@@ -148,6 +148,9 @@
         ok = YES;
     });
 
+    // Hardware-mic inject belongs only in the passthrough app (stable TCC identity).
+    // XPCHelper must not open AVCapture / mic IO — that spams a second unbound prompt.
+
     if (!ok && outError) {
         *outError = [NovaLINKFallbackPlayThrough errorWithCode:kNovaLINKXPC_HardwareError
                                                    description:@"Failed to configure fallback playthrough devices"];

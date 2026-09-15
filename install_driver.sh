@@ -26,6 +26,8 @@ AGENT_LABEL="life.thenurim.novalink.PassthroughAgent"
 AGENT_PLIST_NAME="${AGENT_LABEL}.plist"
 AGENT_TEMPLATE="${ROOT}/NovaLINKApp/NovaLINKXPCHelper/${AGENT_PLIST_NAME}.template"
 DEFAULT_APP_INSTALL="/Applications/${APP_NAME}"
+PASSTHROUGH_IDENTIFIER="life.thenurim.novalink.App"
+PASSTHROUGH_ENTITLEMENTS="${ROOT}/NovaLINKApp/NovaLINKApp/NovaLINKApp.entitlements"
 
 CONFIG="Release"
 UNINSTALL_ONLY=false
@@ -115,6 +117,67 @@ verify_helper_has_fallback() {
   if ! grep -q 'NovaLINKFallbackPlayThrough' <<<"${hay}"; then
     echo "error: ${bin} is missing NovaLINKFallbackPlayThrough" >&2
     exit 1
+  fi
+}
+
+# TCC mic grants only stick when Info.plist is sealed into the CodeDirectory.
+# Linker-signed (xcodebuild with CODE_SIGNING_ALLOWED=NO) leaves Info.plist unbound
+# and re-prompts on every agent launch.
+verify_passthrough_codesign() {
+  local app="$1"
+  local info
+  info="$(codesign -dv --verbose=4 "${app}" 2>&1 || true)"
+  if ! grep -q "Identifier=${PASSTHROUGH_IDENTIFIER}" <<<"${info}"; then
+    echo "error: ${app} is not signed as ${PASSTHROUGH_IDENTIFIER}" >&2
+    echo "${info}" >&2
+    echo "Rebuild with: ./build_all.sh ${CONFIG}" >&2
+    exit 1
+  fi
+  if grep -q 'Info.plist=not bound' <<<"${info}" || grep -q 'linker-signed' <<<"${info}"; then
+    echo "error: ${app} has unbound/linker-signed codesign (TCC will re-prompt forever)" >&2
+    echo "${info}" >&2
+    echo "Rebuild with: ./build_all.sh ${CONFIG}" >&2
+    exit 1
+  fi
+  if ! grep -q 'Info.plist entries=' <<<"${info}"; then
+    echo "error: ${app} Info.plist is not bound into the signature" >&2
+    echo "${info}" >&2
+    exit 1
+  fi
+  codesign --verify --verbose=2 "${app}" >/dev/null
+}
+
+sign_passthrough_app() {
+  local app="$1"
+  local bin="${app}/Contents/MacOS/NovaLINK Audio Passthrough"
+  if [[ ! -f "${PASSTHROUGH_ENTITLEMENTS}" ]]; then
+    echo "error: missing entitlements: ${PASSTHROUGH_ENTITLEMENTS}" >&2
+    exit 1
+  fi
+  # Prefer signing as the installing user so LaunchAgent (gui session) matches.
+  # Fall back to sudo if /Applications is not writable.
+  if [[ -w "${bin}" ]]; then
+    codesign --force --sign - \
+      --identifier "${PASSTHROUGH_IDENTIFIER}" \
+      --entitlements "${PASSTHROUGH_ENTITLEMENTS}" \
+      --options runtime \
+      "${bin}"
+    codesign --force --deep --sign - \
+      --identifier "${PASSTHROUGH_IDENTIFIER}" \
+      --entitlements "${PASSTHROUGH_ENTITLEMENTS}" \
+      --options runtime \
+      "${app}"
+  else
+    sudo codesign --force --sign - \
+      --identifier "${PASSTHROUGH_IDENTIFIER}" \
+      --entitlements "${PASSTHROUGH_ENTITLEMENTS}" \
+      --options runtime \
+      "${bin}"
+    sudo codesign --force --deep --sign - \
+      --identifier "${PASSTHROUGH_IDENTIFIER}" \
+      --entitlements "${PASSTHROUGH_ENTITLEMENTS}" \
+      --options runtime \
+      "${app}"
   fi
 }
 
@@ -214,6 +277,8 @@ install_helper() {
 install_app() {
   local src
   src="$(require_dist_bundle "${APP_NAME}")"
+  echo "$(bold "Verifying") dist passthrough codesign (Info.plist must be bound)"
+  verify_passthrough_codesign "${src}"
   echo "$(bold "Installing") ${CONFIG} passthrough app"
   echo "  from: ${src}"
   echo "  to:   ${DEFAULT_APP_INSTALL}"
@@ -221,7 +286,11 @@ install_app() {
   require_same_sha \
     "${src}/Contents/MacOS/NovaLINK Audio Passthrough" \
     "${DEFAULT_APP_INSTALL}/Contents/MacOS/NovaLINK Audio Passthrough"
-  echo "$(bold "Installed app.")"
+  # ditto/chown can leave the on-disk signature stale on some hosts — re-seal and verify.
+  echo "$(bold "Re-sealing") installed passthrough codesign"
+  sign_passthrough_app "${DEFAULT_APP_INSTALL}"
+  verify_passthrough_codesign "${DEFAULT_APP_INSTALL}"
+  echo "$(bold "Installed app.") codesign OK (Info.plist bound)"
 }
 
 install_agent() {
@@ -287,7 +356,9 @@ PY
 
   echo "$(bold "LaunchAgent running.")"
   echo "  Log: /tmp/novalink-passthrough-agent.log"
-  echo "  Mic: System Settings → Privacy & Security → Microphone → NovaLINK Audio Passthrough"
+  echo "  Mic: allow once in System Settings → Privacy & Security → Microphone"
+  echo "       (life.thenurim.novalink.App / NovaLINK Audio Passthrough)."
+  echo "       With a bound Info.plist signature the grant should stick across relaunches."
 }
 
 restart_helper() {

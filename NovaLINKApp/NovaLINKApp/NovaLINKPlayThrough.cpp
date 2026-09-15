@@ -26,6 +26,7 @@
 // Local Includes
 #include "NovaLINK_Types.h"
 #include "NovaLINK_Utils.h"
+#include "NovaLINKMicrophoneAccess.h"
 
 // PublicUtility Includes
 #include "CAHALAudioSystemObject.h"
@@ -612,6 +613,20 @@ void    NovaLINKPlayThrough::Start()
     {
         Stop();
         Start();
+        return;
+    }
+
+    // Never StartIOProc on the (virtual) input until Microphone TCC is granted.
+    // Otherwise each StartIOProc can queue another identical system dialog.
+    if(!NovaLINKMicrophoneAccessIsAuthorized())
+    {
+        LogWarning("NovaLINKPlayThrough::Start: Microphone not authorized — skipping StartIOProc "
+                   "(avoids stacked TCC dialogs)");
+        CAMutex::Locker stateLocker(mStateMutex);
+        mPlayingThrough = false;
+        mInputDeviceIOProcState = IOState::Stopped;
+        mOutputDeviceIOProcState = IOState::Stopped;
+        ReleaseThreadsWaitingForOutputToStart();
         return;
     }
 

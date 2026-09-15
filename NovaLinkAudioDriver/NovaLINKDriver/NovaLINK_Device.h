@@ -52,6 +52,7 @@
 // System Includes
 #include <CoreFoundation/CoreFoundation.h>
 #include <pthread.h>
+#include <memory>
 
 
 class NovaLINK_Device
@@ -118,8 +119,10 @@ public:
 	void						EndIOOperation(UInt32 inOperationID, UInt32 inIOBufferFrameSize, const AudioServerPlugInIOCycleInfo& inIOCycleInfo, UInt32 inClientID);
 
 private:
-	void						ReadInputData(UInt32 inIOBufferFrameSize, Float64 inSampleTime, void* __nonnull outBuffer);
+	void						ReadInputData(UInt32 inIOBufferFrameSize, Float64 inSampleTime, void* __nonnull outBuffer, bool inMixMic);
     void						WriteOutputData(UInt32 inIOBufferFrameSize, Float64 inSampleTime, const void* __nonnull inBuffer);
+    void						InjectMicAudio(const Float32* __nonnull inSamples, UInt32 inFrameCount);
+    bool						SupportsMicMix() const { return GetObjectID() == kObjectID_Device; }
 
 #pragma mark Accessors
 
@@ -253,6 +256,14 @@ private:
     #define kLoopbackRingBufferFrameSize    16384
     Float64                     mLoopbackSampleRate;
     CARingBuffer                mLoopbackRingBuffer;
+
+    // Hardware mic PCM injected by App/Helper; mixed into ReadInput for non-passthrough clients.
+    CARingBuffer                mMicRingBuffer;
+    CARingBuffer::SampleTime    mMicSampleTime = 0;
+    bool                        mMicRingAllocated = false;
+    // Scratch for mic mix in ReadInputData (sized in InitLoopback).
+    std::unique_ptr<Float32[]>  mMicMixScratch;
+    UInt32                      mMicMixScratchFrames = 0;
 
     // TODO: a comment explaining why we need a clock for loopback-only mode
     struct {

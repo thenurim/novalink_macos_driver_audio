@@ -206,6 +206,15 @@ void    NovaLINK_Device::InitLoopback()
     //  Pass 1 for nChannels because it's going to be storing interleaved audio, which means we
     //  don't need a separate buffer for each channel.
 	mLoopbackRingBuffer.Allocate(1, 2 * sizeof(Float32), kLoopbackRingBufferFrameSize);
+
+    if(SupportsMicMix())
+    {
+        mMicRingBuffer.Allocate(1, 2 * sizeof(Float32), kLoopbackRingBufferFrameSize);
+        mMicSampleTime = 0;
+        mMicRingAllocated = true;
+        mMicMixScratchFrames = kLoopbackRingBufferFrameSize;
+        mMicMixScratch.reset(new Float32[mMicMixScratchFrames * 2]);
+    }
 }
 
 #pragma mark Property Operations
@@ -329,6 +338,10 @@ bool	NovaLINK_Device::Device_HasProperty(AudioObjectID inObjectID, pid_t inClien
         case kAudioDeviceCustomPropertyEnabledOutputControls:
 			theAnswer = true;
 			break;
+
+        case kAudioDeviceCustomPropertyInjectMicAudio:
+			theAnswer = SupportsMicMix();
+			break;
 			
 		case kAudioDevicePropertyLatency:
 		case kAudioDevicePropertySafetyOffset:
@@ -374,6 +387,10 @@ bool	NovaLINK_Device::Device_IsPropertySettable(AudioObjectID inObjectID, pid_t 
         case kAudioDeviceCustomPropertyMusicPlayerBundleID:
         case kAudioDeviceCustomPropertyEnabledOutputControls:
 			theAnswer = true;
+			break;
+
+        case kAudioDeviceCustomPropertyInjectMicAudio:
+			theAnswer = SupportsMicMix();
 			break;
 		
 		default:
@@ -459,7 +476,7 @@ UInt32	NovaLINK_Device::Device_GetPropertyDataSize(AudioObjectID inObjectID, pid
             break;
             
         case kAudioObjectPropertyCustomPropertyInfoList:
-            theAnswer = sizeof(AudioServerPlugInCustomPropertyInfo) * 5;
+            theAnswer = sizeof(AudioServerPlugInCustomPropertyInfo) * (SupportsMicMix() ? 6 : 5);
             break;
             
         case kAudioDeviceCustomPropertyDeviceAudibleState:
@@ -480,6 +497,10 @@ UInt32	NovaLINK_Device::Device_GetPropertyDataSize(AudioObjectID inObjectID, pid
 
         case kAudioDeviceCustomPropertyEnabledOutputControls:
             theAnswer = sizeof(CFArrayRef);
+            break;
+
+        case kAudioDeviceCustomPropertyInjectMicAudio:
+            theAnswer = sizeof(CFDataRef);
             break;
 		
 		default:
@@ -882,9 +903,12 @@ void	NovaLINK_Device::Device_GetPropertyData(AudioObjectID inObjectID, pid_t inC
             theNumberItemsToFetch = inDataSize / sizeof(AudioServerPlugInCustomPropertyInfo);
             
             //	clamp it to the number of items we have
-            if(theNumberItemsToFetch > 5)
             {
-                theNumberItemsToFetch = 5;
+                UInt32 theInfoCount = SupportsMicMix() ? 6 : 5;
+                if(theNumberItemsToFetch > theInfoCount)
+                {
+                    theNumberItemsToFetch = theInfoCount;
+                }
             }
             
             if(theNumberItemsToFetch > 0)
@@ -916,6 +940,12 @@ void	NovaLINK_Device::Device_GetPropertyData(AudioObjectID inObjectID, pid_t inC
                 ((AudioServerPlugInCustomPropertyInfo*)outData)[4].mSelector = kAudioDeviceCustomPropertyEnabledOutputControls;
                 ((AudioServerPlugInCustomPropertyInfo*)outData)[4].mPropertyDataType = kAudioServerPlugInCustomPropertyDataTypeCFPropertyList;
                 ((AudioServerPlugInCustomPropertyInfo*)outData)[4].mQualifierDataType = kAudioServerPlugInCustomPropertyDataTypeNone;
+            }
+            if(theNumberItemsToFetch > 5)
+            {
+                ((AudioServerPlugInCustomPropertyInfo*)outData)[5].mSelector = kAudioDeviceCustomPropertyInjectMicAudio;
+                ((AudioServerPlugInCustomPropertyInfo*)outData)[5].mPropertyDataType = kAudioServerPlugInCustomPropertyDataTypeCFPropertyList;
+                ((AudioServerPlugInCustomPropertyInfo*)outData)[5].mQualifierDataType = kAudioServerPlugInCustomPropertyDataTypeNone;
             }
 
             outDataSize = theNumberItemsToFetch * sizeof(AudioServerPlugInCustomPropertyInfo);
@@ -971,6 +1001,15 @@ void	NovaLINK_Device::Device_GetPropertyData(AudioObjectID inObjectID, pid_t inC
 
                 *reinterpret_cast<CFArrayRef*>(outData) = theEnabledControls.CopyCFArray();
                 outDataSize = sizeof(CFArrayRef);
+            }
+            break;
+
+        case kAudioDeviceCustomPropertyInjectMicAudio:
+            {
+                // Write-only from the client's perspective; return empty data so GetProperty succeeds.
+                ThrowIf(inDataSize < sizeof(CFDataRef), CAException(kAudioHardwareBadPropertySizeError), "NovaLINK_Device::Device_GetPropertyData: not enough space for kAudioDeviceCustomPropertyInjectMicAudio");
+                *reinterpret_cast<CFDataRef*>(outData) = CFDataCreate(kCFAllocatorDefault, nullptr, 0);
+                outDataSize = sizeof(CFDataRef);
             }
             break;
 
@@ -1102,6 +1141,48 @@ void	NovaLINK_Device::Device_SetPropertyData(AudioObjectID inObjectID, pid_t inC
                         "kAudioDeviceCustomPropertyEnabledOutputControls");
 
                 RequestEnabledControls(theVolumeControlEnabled, theMuteControlEnabled);
+            }
+            break;
+
+        case kAudioDeviceCustomPropertyInjectMicAudio:
+            {
+                ThrowIf(!SupportsMicMix(),
+                        CAException(kAudioHardwareUnknownPropertyError),
+                        "NovaLINK_Device::Device_SetPropertyData: mic inject is only supported on the main device");
+                ThrowIf(inDataSize < sizeof(CFDataRef),
+                        CAException(kAudioHardwareBadPropertySizeError),
+                        "NovaLINK_Device::Device_SetPropertyData: wrong size for kAudioDeviceCustomPropertyInjectMicAudio");
+
+                CFDataRef theAudioData = *reinterpret_cast<const CFDataRef*>(inData);
+                ThrowIfNULL(theAudioData,
+                            CAException(kAudioHardwareIllegalOperationError),
+                            "NovaLINK_Device::Device_SetPropertyData: null CFData for kAudioDeviceCustomPropertyInjectMicAudio");
+                ThrowIf(CFGetTypeID(theAudioData) != CFDataGetTypeID(),
+                        CAException(kAudioHardwareIllegalOperationError),
+                        "NovaLINK_Device::Device_SetPropertyData: expected CFData for kAudioDeviceCustomPropertyInjectMicAudio");
+
+                const CFIndex theByteCount = CFDataGetLength(theAudioData);
+                ThrowIf(theByteCount < 0,
+                        CAException(kAudioHardwareIllegalOperationError),
+                        "NovaLINK_Device::Device_SetPropertyData: negative CFData length for mic inject");
+                // Interleaved stereo Float32 — reject partial frames.
+                ThrowIf((theByteCount % static_cast<CFIndex>(2 * sizeof(Float32))) != 0,
+                        CAException(kAudioHardwareIllegalOperationError),
+                        "NovaLINK_Device::Device_SetPropertyData: mic inject CFData size must be a multiple of one stereo Float32 frame");
+
+                const UInt32 theFrameCount =
+                        static_cast<UInt32>(static_cast<size_t>(theByteCount) / (2 * sizeof(Float32)));
+                if(theFrameCount == 0)
+                {
+                    break;
+                }
+
+                const Float32* theSamples = reinterpret_cast<const Float32*>(CFDataGetBytePtr(theAudioData));
+                ThrowIfNULL(theSamples,
+                            CAException(kAudioHardwareIllegalOperationError),
+                            "NovaLINK_Device::Device_SetPropertyData: CFDataGetBytePtr returned null");
+
+                InjectMicAudio(theSamples, theFrameCount);
             }
             break;
 
@@ -1317,9 +1398,14 @@ void	NovaLINK_Device::DoIOOperation(AudioObjectID inStreamObjectID, UInt32 inCli
                 // If an IO operation misses its deadline, the host will log this message:
                 //     Audio IO Overload inputs: '<private>' outputs: '<private>' cause: 'Unknown'
                 //     prewarming: no recovering: no
+                //
+                // Passthrough hosts (App / XPCHelper) get desktop loopback only so speakers do not
+                // play the injected mic. Other clients (Zoom, OBS, …) get desktop + mic.
+                const bool mixMic = SupportsMicMix() && !mClients.IsPassthroughHost(inClientID);
                 ReadInputData(inIOBufferFrameSize,
                               inIOCycleInfo.mInputTime.mSampleTime,
-                              ioMainBuffer);
+                              ioMainBuffer,
+                              mixMic);
             }
 			break;
             
@@ -1403,7 +1489,7 @@ void	NovaLINK_Device::EndIOOperation(UInt32 inOperationID, UInt32 inIOBufferFram
     }
 }
 
-void	NovaLINK_Device::ReadInputData(UInt32 inIOBufferFrameSize, Float64 inSampleTime, void* outBuffer)
+void	NovaLINK_Device::ReadInputData(UInt32 inIOBufferFrameSize, Float64 inSampleTime, void* outBuffer, bool inMixMic)
 {
     // Wrap the provided buffer in an AudioBufferList.
     AudioBufferList abl = {};
@@ -1441,6 +1527,69 @@ void	NovaLINK_Device::ReadInputData(UInt32 inIOBufferFrameSize, Float64 inSample
             break;
         default:
             throw CAException(kAudioHardwareUnspecifiedError);
+    }
+
+    if(!inMixMic || !mMicRingAllocated || mMicSampleTime < static_cast<CARingBuffer::SampleTime>(inIOBufferFrameSize))
+    {
+        return;
+    }
+
+    if(mMicMixScratchFrames < inIOBufferFrameSize || !mMicMixScratch)
+    {
+        return;
+    }
+
+    // Mix the most recently injected mic frames on top of the desktop loopback.
+    const CARingBuffer::SampleTime micReadTime = mMicSampleTime - inIOBufferFrameSize;
+    Float32* const micScratch = mMicMixScratch.get();
+    AudioBufferList micAbl = {};
+    micAbl.mNumberBuffers = 1;
+    micAbl.mBuffers[0].mNumberChannels = 2;
+    micAbl.mBuffers[0].mDataByteSize = abl.mBuffers[0].mDataByteSize;
+    micAbl.mBuffers[0].mData = micScratch;
+
+    const CARingBufferError micErr =
+            mMicRingBuffer.Fetch(&micAbl, inIOBufferFrameSize, micReadTime);
+    if(micErr != kCARingBufferError_OK)
+    {
+        return;
+    }
+
+    Float32* const outSamples = static_cast<Float32*>(outBuffer);
+    const UInt32 sampleCount = inIOBufferFrameSize * 2;
+    for(UInt32 i = 0; i < sampleCount; i++)
+    {
+        const Float32 mixed = outSamples[i] + micScratch[i];
+        outSamples[i] = (mixed > 1.0f) ? 1.0f : ((mixed < -1.0f) ? -1.0f : mixed);
+    }
+}
+
+void	NovaLINK_Device::InjectMicAudio(const Float32* inSamples, UInt32 inFrameCount)
+{
+    if(!mMicRingAllocated || inFrameCount == 0)
+    {
+        return;
+    }
+
+    // Cap a single inject so a misbehaving client cannot overrun the ring in one call.
+    if(inFrameCount > kLoopbackRingBufferFrameSize / 2)
+    {
+        inFrameCount = kLoopbackRingBufferFrameSize / 2;
+    }
+
+    CAMutex::Locker theIOLocker(mIOMutex);
+
+    AudioBufferList abl = {};
+    abl.mNumberBuffers = 1;
+    abl.mBuffers[0].mNumberChannels = 2;
+    abl.mBuffers[0].mDataByteSize = static_cast<UInt32>(inFrameCount * sizeof(Float32) * 2);
+    abl.mBuffers[0].mData = const_cast<Float32*>(inSamples);
+
+    const CARingBufferError err =
+            mMicRingBuffer.Store(&abl, inFrameCount, mMicSampleTime);
+    if(err == kCARingBufferError_OK || err == kCARingBufferError_CPUOverload)
+    {
+        mMicSampleTime += inFrameCount;
     }
 }
 
