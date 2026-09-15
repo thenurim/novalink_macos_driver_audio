@@ -272,7 +272,8 @@ UInt32	CAHALAudioDevice::GetClockDomain() const
 
 Float64	CAHALAudioDevice::GetActualSampleRate() const
 {
-    Throw(new CAException(kAudio_UnimplementedError));
+    // Mirror Nominal unless a test sets a distinct Actual via future mock fields.
+    return MockAudioObjects::GetAudioDevice(GetObjectID())->mNominalSampleRate;
 }
 
 UInt32	CAHALAudioDevice::GetNumberAvailableNominalSampleRateRanges() const

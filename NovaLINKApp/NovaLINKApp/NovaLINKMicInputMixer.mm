@@ -74,6 +74,34 @@ AudioStreamBasicDescription StereoFloatFormat(Float64 sampleRate)
     return asbd;
 }
 
+// Opening a Bluetooth headset as an *input* forces macOS into HFP/HSP (mono ~8/16 kHz) for that
+// device's output as well. Playthrough then sounds like a phone call / "monster" voice. Never use
+// BT/AirPlay devices as the hardware mic for inject — prefer built-in / USB instead.
+BOOL IsUnsafeMicTransport(const NovaLINKAudioDevice& device)
+{
+    try {
+        switch (device.GetTransportType()) {
+            case kAudioDeviceTransportTypeBluetooth:
+            case kAudioDeviceTransportTypeBluetoothLE:
+            case kAudioDeviceTransportTypeAirPlay:
+                return YES;
+            default:
+                return NO;
+        }
+    } catch (...) {
+        return NO;
+    }
+}
+
+BOOL IsBuiltInTransport(const NovaLINKAudioDevice& device)
+{
+    try {
+        return device.GetTransportType() == kAudioDeviceTransportTypeBuiltIn;
+    } catch (...) {
+        return NO;
+    }
+}
+
 }  // namespace
 
 @implementation NovaLINKMicInputMixer {
@@ -121,14 +149,36 @@ AudioStreamBasicDescription StereoFloatFormat(Float64 sampleRate)
 
 + (AudioObjectID) resolveHardwareInputDeviceID {
     AudioObjectID inputDevice = kAudioObjectUnknown;
+    AudioObjectID builtInFallback = kAudioObjectUnknown;
+    AudioObjectID anySafeFallback = kAudioObjectUnknown;
     CAHALAudioSystemObject audioSystem;
+
+    auto considerDevice = [&](NovaLINKAudioDevice device) {
+        if (device.GetObjectID() == kAudioObjectUnknown ||
+            device.IsNovaLINKDeviceInstance() ||
+            device.GetNumberStreams(true) == 0 ||
+            IsUnsafeMicTransport(device)) {
+            return;
+        }
+        if (IsBuiltInTransport(device) && builtInFallback == kAudioObjectUnknown) {
+            builtInFallback = device.GetObjectID();
+        }
+        if (anySafeFallback == kAudioObjectUnknown) {
+            anySafeFallback = device.GetObjectID();
+        }
+    };
 
     NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
         NovaLINKAudioDevice defaultInput = audioSystem.GetDefaultAudioDevice(true, false);
         if (defaultInput.GetObjectID() != kAudioObjectUnknown &&
             !defaultInput.IsNovaLINKDeviceInstance() &&
-            defaultInput.GetNumberStreams(true) > 0) {
+            defaultInput.GetNumberStreams(true) > 0 &&
+            !IsUnsafeMicTransport(defaultInput)) {
             inputDevice = defaultInput.GetObjectID();
+        } else if (defaultInput.GetObjectID() != kAudioObjectUnknown &&
+                   IsUnsafeMicTransport(defaultInput)) {
+            LogWarning("NovaLINKMicInputMixer: Default input is Bluetooth/AirPlay — skipping to "
+                       "avoid forcing HFP (mono / low-rate) on the headset output");
         }
     });
 
@@ -142,16 +192,14 @@ AudioStreamBasicDescription StereoFloatFormat(Float64 sampleRate)
         audioSystem.GetAudioDevices(numDevices, devices.data());
 
         for (UInt32 i = 0; i < numDevices; i++) {
-            NovaLINKAudioDevice device(devices[i]);
-            if (device.IsNovaLINKDeviceInstance() || device.GetNumberStreams(true) == 0) {
-                continue;
-            }
-            inputDevice = devices[i];
-            break;
+            considerDevice(NovaLINKAudioDevice(devices[i]));
         }
     });
 
-    return inputDevice;
+    if (builtInFallback != kAudioObjectUnknown) {
+        return builtInFallback;
+    }
+    return anySafeFallback;
 }
 
 - (BOOL) prepareDevicesLocked {

@@ -93,6 +93,8 @@ public:
 private:
     void                AllocateBuffer() REQUIRES(mStateMutex);
     void                DeallocateBuffer();
+    /*! Cache output ASBD fields used by the realtime IOProcs (channels / bytes per frame). */
+    void                CacheOutputFormat() REQUIRES(mStateMutex);
 
     /*! @throws CAException */
     void                CreateIOProcIDs();
@@ -103,6 +105,25 @@ private:
         @nonthreadsafe
      */
     bool                CheckIOProcsAreStopped() const noexcept REQUIRES(mStateMutex);
+
+    /*!
+     Bluetooth / BLE / AirPlay often keep a Nominal rate that does not match the hardware clock.
+     PlayThrough has no resampler, so those transports must always be the rate master.
+     */
+    bool                OutputTransportMustBeRateMaster() const;
+    /*!
+     Prefer Actual (and stream virtual format) over Nominal when they disagree — especially for
+     rate-master transports, where Nominal can lie until/after StartIO.
+     */
+    Float64             EffectiveOutputSampleRate() const;
+    /*! Match NovaLINK sample rate / buffer size to the real output. @throws CAException */
+    void                SyncIOParametersToDevices() REQUIRES(mStateMutex);
+    /*!
+     Re-read the output clock after IO has started (when Actual becomes trustworthy) and match
+     NovaLINK if needed. Safe to call from a non-realtime queue.
+     */
+    void                ReconcileSampleRatesToOutput();
+    void                ScheduleSampleRateReconcile();
 	
 public:
     /*!
@@ -139,6 +160,10 @@ private:
                                               UInt32 inNumberAddresses,
                                               const AudioObjectPropertyAddress* inAddresses,
                                               void* __nullable inClientData);
+    static OSStatus     OutputDeviceListenerProc(AudioObjectID inObjectID,
+                                                 UInt32 inNumberAddresses,
+                                                 const AudioObjectPropertyAddress* inAddresses,
+                                                 void* __nullable inClientData);
     static void         HandleNovaLINKDeviceIsRunning(NovaLINKPlayThrough* refCon);
     static void         HandleNovaLINKDeviceIsRunningSomewhereOtherThanNovaLINKApp(NovaLINKPlayThrough* refCon);
     
@@ -224,6 +249,20 @@ private:
     // since the last Start(); until then (or until the safety deadline) StopIfIdle is a no-op.
     bool                mIdleStopArmed { true };
     UInt64              mIdleStopArmDeadlineHostTime { 0 };
+
+    // Bumped on Deactivate / device change so delayed sample-rate reconcile blocks no-op.
+    std::atomic<UInt64> mSampleRateReconcileGeneration { 0 };
+
+    // Ring buffer always matches NovaLINK input (stereo float). Output may be mono (HFP).
+    UInt32              mRingBytesPerFrame { 8 };
+    UInt32              mRingChannels { 2 };
+    std::atomic<UInt32> mOutputBytesPerFrame { 8 };
+    std::atomic<UInt32> mOutputChannels { 2 };
+    // Scratch for stereo→mono downmix in OutputDeviceIOProc (size in frames).
+    // Touched only while holding mBufferOutputMutex (same as mBuffer); no GUARDED_BY —
+    // Clang rejects both guarded_by and pt_guarded_by on unique_ptr<T[]>.
+    std::unique_ptr<Float32[]> mOutputScratch { nullptr };
+    UInt32              mOutputScratchFrames { 0 };
 
     std::atomic<IOState>    mInputDeviceIOProcState { IOState::Stopped };
     std::atomic<IOState>    mOutputDeviceIOProcState { IOState::Stopped };

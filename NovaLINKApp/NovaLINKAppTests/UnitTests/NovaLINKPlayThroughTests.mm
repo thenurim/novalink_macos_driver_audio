@@ -83,13 +83,19 @@
     XCTAssertEqual(123, inputDevice.GetIOBufferSize());
 
     // It should add the property listeners it needs.
-    std::set<AudioObjectPropertySelector> expectedProperties {
+    std::set<AudioObjectPropertySelector> expectedInputProperties {
             kAudioDevicePropertyDeviceIsRunning,
             kAudioDeviceProcessorOverload,
             kAudioDeviceCustomPropertyDeviceIsRunningSomewhereOtherThanNovaLINKApp
     };
+    std::set<AudioObjectPropertySelector> expectedOutputProperties {
+            kAudioDevicePropertyNominalSampleRate,
+            kAudioDevicePropertyActualSampleRate,
+            kAudioDevicePropertyStreamConfiguration
+    };
 
-    XCTAssertEqual(expectedProperties, mockInputDevice->mPropertiesWithListeners);
+    XCTAssertEqual(expectedInputProperties, mockInputDevice->mPropertiesWithListeners);
+    XCTAssertEqual(expectedOutputProperties, mockOutputDevice->mPropertiesWithListeners);
 }
 
 - (void) testDeactivate {
@@ -100,6 +106,7 @@
 
     // It should remove the property listeners added by Activate.
     XCTAssert(mockInputDevice->mPropertiesWithListeners.empty());
+    XCTAssert(mockOutputDevice->mPropertiesWithListeners.empty());
 }
 
 @end
