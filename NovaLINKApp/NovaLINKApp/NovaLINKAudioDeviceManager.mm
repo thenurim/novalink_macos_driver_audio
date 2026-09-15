@@ -224,21 +224,50 @@
 
         AudioDeviceID currentDeviceID = outputDevice.GetObjectID();  // (Doesn't throw.)
 
-        try {
-            [self setOutputDeviceWithIDImpl:newDeviceID
-                               dataSourceID:dataSourceID
-                            currentDeviceID:currentDeviceID];
-        } catch (const CAException& e) {
-            NovaLINKAssert(e.GetError() != kAudioHardwareNoError,
-                      "CAException with kAudioHardwareNoError");
-            
-            return [self failedToSetOutputDevice:newDeviceID
-                                       errorCode:e.GetError()
-                                        revertTo:(revertOnFailure ? &currentDeviceID : nullptr)];
-        } catch (...) {
-            return [self failedToSetOutputDevice:newDeviceID
-                                       errorCode:kAudioHardwareUnspecifiedError
-                                        revertTo:(revertOnFailure ? &currentDeviceID : nullptr)];
+        // coreaudiod briefly invalidates AudioObjectIDs while it restarts IO for a HAL plugin
+        // config change. On a real cold boot this can chain across several restart cycles (TCC
+        // prompts, Bluetooth reconnects, driver (re)registration, ...), so the window can run
+        // several seconds rather than the sub-second hiccup seen in a warm repro. It shows up
+        // here as kAudioHardwareBadObjectError on an otherwise-valid device. Retry with a
+        // deadline before giving up instead of surfacing "Failed to set X as the output device".
+        NSDate* retryDeadline = [NSDate dateWithTimeIntervalSinceNow:8.0];
+        BOOL succeeded = NO;
+        NSError* __nullable lastError = nil;
+
+        while (!succeeded) {
+            try {
+                [self setOutputDeviceWithIDImpl:newDeviceID
+                                   dataSourceID:dataSourceID
+                                currentDeviceID:currentDeviceID];
+                succeeded = YES;
+            } catch (const CAException& e) {
+                NovaLINKAssert(e.GetError() != kAudioHardwareNoError,
+                          "CAException with kAudioHardwareNoError");
+
+                if (e.GetError() == kAudioHardwareBadObjectError &&
+                    retryDeadline.timeIntervalSinceNow > 0) {
+                    LogWarning("NovaLINKAudioDeviceManager::setOutputDeviceWithIDImpl: Got "
+                               "kAudioHardwareBadObjectError, probably coreaudiod mid-restart. "
+                               "Retrying for up to %.1fs more.",
+                               retryDeadline.timeIntervalSinceNow);
+                    [NSThread sleepForTimeInterval:0.3];
+                    continue;
+                }
+
+                lastError = [self failedToSetOutputDevice:newDeviceID
+                                                 errorCode:e.GetError()
+                                                  revertTo:(revertOnFailure ? &currentDeviceID : nullptr)];
+                break;
+            } catch (...) {
+                lastError = [self failedToSetOutputDevice:newDeviceID
+                                                 errorCode:kAudioHardwareUnspecifiedError
+                                                  revertTo:(revertOnFailure ? &currentDeviceID : nullptr)];
+                break;
+            }
+        }
+
+        if (lastError) {
+            return lastError;
         }
 
         // Tell other classes and NovaLINKXPCHelper that we changed the output device.
