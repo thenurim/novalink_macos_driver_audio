@@ -236,6 +236,17 @@ static NSString* const kPassthroughAgentLabel = @"life.thenurim.novalink.Passthr
 
     if (agentMode) {
         NSLog(@"NovaLINKAppDelegate: agent playthrough host ready (status bar visible, OS default unchanged)");
+        // LaunchAgent often creates the status item before AppKit has a real button frame,
+        // which sizes the icon to 0×0. Re-assert after launch (and once more shortly after).
+        [self->statusBarItem ensureVisible];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            [self->statusBarItem ensureVisible];
+        });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            [self->statusBarItem ensureVisible];
+        });
         // If clients are already writing to NovaLINK (user selected it before the agent
         // finished launching), kick playthrough without waiting for another StartIO/XPC edge.
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
@@ -245,6 +256,8 @@ static NSString* const kPassthroughAgentLabel = @"life.thenurim.novalink.Passthr
             NSLog(@"NovaLINKAppDelegate: agent initial playthrough kick "
                   "(main=%d ui=%d)", (int)errMain, (int)errUI);
         });
+    } else if (statusBarItem) {
+        [statusBarItem ensureVisible];
     }
 
     continueLaunchCompleted = YES;

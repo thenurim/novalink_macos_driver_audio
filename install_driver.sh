@@ -226,11 +226,55 @@ remove_installed_driver() {
   sudo rm -rf "${INSTALLED_DRIVER_PATH}"
 }
 
+# launchctl bootstrap returns EIO (5) when the service is disabled, still
+# registered, or the domain is briefly unsettled. Never leave the job disabled
+# across a reinstall — that makes every subsequent bootstrap fail with EIO until
+# a legacy `load -w` happens to clear it.
+bootout_agent_for_uid() {
+  local uid="$1"
+  local plist="${2:-}"
+  local domain="gui/${uid}"
+  local service="${domain}/${AGENT_LABEL}"
+  local i
+
+  # Stop any leftover agent/UI process holding the instance lock.
+  pkill -x "NovaLINK Audio Passthrough" 2>/dev/null || true
+  sleep 0.3
+  # Only escalate if still alive — avoid blasting SIGKILL on every path.
+  if pgrep -x "NovaLINK Audio Passthrough" >/dev/null 2>&1; then
+    pkill -9 -x "NovaLINK Audio Passthrough" 2>/dev/null || true
+  fi
+
+  launchctl bootout "${service}" 2>/dev/null || true
+  if [[ -n "${plist}" && -f "${plist}" ]]; then
+    launchctl bootout "${domain}" "${plist}" 2>/dev/null || true
+    launchctl unload "${plist}" 2>/dev/null || true
+  fi
+  # Wait until the process is actually gone so coreaudiod is not left serving a
+  # half-dead HAL client (that pattern drives coreaudiod to 100%+ CPU).
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    if ! pgrep -x "NovaLINK Audio Passthrough" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.2
+  done
+  # Keep enabled so the next bootstrap/kickstart can succeed.
+  launchctl enable "${service}" 2>/dev/null || true
+}
+
+agent_is_registered() {
+  local uid="$1"
+  launchctl print "gui/${uid}/${AGENT_LABEL}" >/dev/null 2>&1
+}
+
 unload_agent_for_current_user() {
-  local uid
+  local uid user_plist
   uid="$(id -u)"
-  launchctl bootout "gui/${uid}/${AGENT_LABEL}" 2>/dev/null || true
-  rm -f "${HOME}/Library/LaunchAgents/${AGENT_PLIST_NAME}"
+  user_plist="${HOME}/Library/LaunchAgents/${AGENT_PLIST_NAME}"
+  bootout_agent_for_uid "${uid}" "${user_plist}"
+  # Uninstall only: prevent auto-reload of a leftover plist until we delete it.
+  launchctl disable "gui/${uid}/${AGENT_LABEL}" 2>/dev/null || true
+  rm -f "${user_plist}"
   if [[ -f "/Library/LaunchAgents/${AGENT_PLIST_NAME}" ]]; then
     sudo rm -f "/Library/LaunchAgents/${AGENT_PLIST_NAME}"
   fi
@@ -293,6 +337,70 @@ install_app() {
   echo "$(bold "Installed app.") codesign OK (Info.plist bound)"
 }
 
+bootstrap_or_kickstart_agent() {
+  local uid="$1"
+  local plist="$2"
+  local domain="gui/${uid}"
+  local service="${domain}/${AGENT_LABEL}"
+  local attempt err_file
+
+  err_file="$(mktemp)"
+  # Clear any sticky disabled bit from older installers / failed runs.
+  launchctl enable "${service}" 2>/dev/null || true
+
+  for attempt in 1 2 3; do
+    if agent_is_registered "${uid}"; then
+      if launchctl kickstart -k "${service}" 2>"${err_file}"; then
+        rm -f "${err_file}"
+        return 0
+      fi
+      echo "warning: kickstart failed (attempt ${attempt}/3); re-bootstrapping:" >&2
+      sed 's/^/  /' "${err_file}" >&2 || true
+      bootout_agent_for_uid "${uid}" "${plist}"
+      sleep 1
+    fi
+
+    if launchctl bootstrap "${domain}" "${plist}" 2>"${err_file}"; then
+      launchctl enable "${service}" 2>/dev/null || true
+      launchctl kickstart -k "${service}" 2>/dev/null \
+        || launchctl kickstart "${service}" 2>/dev/null \
+        || true
+      rm -f "${err_file}"
+      return 0
+    fi
+
+    # EIO usually means "already loaded" (or was disabled). Enable + kickstart
+    # without another bootout — tearing down and retrying bootstrap often loops
+    # on the same error.
+    if grep -qiE 'Input/output error|error = 5|Already loaded|service already loaded' "${err_file}"; then
+      launchctl enable "${service}" 2>/dev/null || true
+      if launchctl kickstart -k "${service}" 2>/dev/null \
+          || agent_is_registered "${uid}"; then
+        rm -f "${err_file}"
+        return 0
+      fi
+    fi
+
+    echo "warning: launchctl bootstrap attempt ${attempt}/3 failed:" >&2
+    sed 's/^/  /' "${err_file}" >&2 || true
+    bootout_agent_for_uid "${uid}" "${plist}"
+    launchctl enable "${service}" 2>/dev/null || true
+    sleep 1
+  done
+
+  # Legacy path: load -w also clears the disabled bit.
+  if launchctl load -w "${plist}" 2>"${err_file}"; then
+    launchctl start "${AGENT_LABEL}" 2>/dev/null || true
+    rm -f "${err_file}"
+    return 0
+  fi
+
+  echo "error: launchctl bootstrap failed for ${AGENT_LABEL}" >&2
+  sed 's/^/  /' "${err_file}" >&2 || true
+  rm -f "${err_file}"
+  return 1
+}
+
 install_agent() {
   if [[ ! -f "${AGENT_TEMPLATE}" ]]; then
     echo "error: missing LaunchAgent template: ${AGENT_TEMPLATE}" >&2
@@ -305,10 +413,12 @@ install_agent() {
     exit 1
   fi
 
-  local tmp_plist user_plist uid
+  local tmp_plist user_plist uid domain service
   tmp_plist="$(mktemp)"
   user_plist="${HOME}/Library/LaunchAgents/${AGENT_PLIST_NAME}"
   uid="$(id -u)"
+  domain="gui/${uid}"
+  service="${domain}/${AGENT_LABEL}"
   mkdir -p "${HOME}/Library/LaunchAgents"
 
   python3 - "${AGENT_TEMPLATE}" "${tmp_plist}" "${app_exec}" <<'PY'
@@ -323,38 +433,15 @@ PY
   echo "  plist: ${user_plist}"
   echo "  exec:  ${app_exec} --agent"
 
-  launchctl bootout "gui/${uid}/${AGENT_LABEL}" 2>/dev/null || true
   cp "${tmp_plist}" "${user_plist}"
   rm -f "${tmp_plist}"
+  launchctl enable "${service}" 2>/dev/null || true
 
-  if ! launchctl bootstrap "gui/${uid}" "${user_plist}"; then
-    echo "error: launchctl bootstrap failed for ${AGENT_LABEL}" >&2
-    exit 1
-  fi
-  launchctl enable "gui/${uid}/${AGENT_LABEL}" 2>/dev/null || true
-  if ! launchctl kickstart -k "gui/${uid}/${AGENT_LABEL}"; then
-    echo "error: launchctl kickstart failed for ${AGENT_LABEL}" >&2
+  if ! start_agent_and_verify "${uid}" "${user_plist}"; then
     exit 1
   fi
 
-  # Confirm the job is actually running.
-  local ready=0
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if launchctl print "gui/${uid}/${AGENT_LABEL}" 2>/dev/null | grep -q 'state = running'; then
-      ready=1
-      break
-    fi
-    sleep 0.5
-  done
-  if [[ "${ready}" -ne 1 ]]; then
-    echo "error: PassthroughAgent did not reach running state" >&2
-    launchctl print "gui/${uid}/${AGENT_LABEL}" 2>&1 | head -40 || true
-    echo "---- /tmp/novalink-passthrough-agent.log ----" >&2
-    tail -40 /tmp/novalink-passthrough-agent.log 2>&1 || true
-    exit 1
-  fi
-
-  echo "$(bold "LaunchAgent running.")"
+  echo "$(bold "LaunchAgent ready.") (status bar should be visible)"
   echo "  Log: /tmp/novalink-passthrough-agent.log"
   echo "  Mic: allow once in System Settings → Privacy & Security → Microphone"
   echo "       (life.thenurim.novalink.App / NovaLINK Audio Passthrough)."
@@ -375,12 +462,108 @@ restart_helper() {
   fi
 }
 
+wait_for_coreaudiod_and_novalink_hal() {
+  echo "$(bold "Waiting") for coreaudiod + NovaLINK HAL settle..."
+  local i
+  for i in $(seq 1 40); do
+    if pgrep -x coreaudiod >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.25
+  done
+  # Generous settle: loading the HAL plugin right after a recycle is when
+  # coreaudiod is most likely to spin if clients attach too early.
+  # Never probe via system_profiler/CoreAudio here — those calls can hang.
+  sleep 6
+  if [[ -d "${INSTALLED_DRIVER_PATH}" ]]; then
+    echo "coreaudiod up; driver bundle present at ${INSTALLED_DRIVER_PATH}"
+  else
+    echo "warning: driver bundle missing at ${INSTALLED_DRIVER_PATH}" >&2
+  fi
+}
+
 restart_coreaudiod() {
   echo "$(bold "Restarting coreaudiod")"
+  local old_pid new_pid i
+  old_pid="$(pgrep -x coreaudiod | head -1 || true)"
+
+  # Soft recycle only. kill -9 leaves CoreAudio/HAL in a thrashing state that
+  # routinely pegs coreaudiod above 100% CPU until reboot.
   if ! sudo launchctl kill SIGTERM system/com.apple.audio.coreaudiod 2>/dev/null; then
-    sudo killall coreaudiod 2>/dev/null || true
+    sudo killall -TERM coreaudiod 2>/dev/null || true
   fi
-  sleep 1
+
+  for i in $(seq 1 60); do
+    new_pid="$(pgrep -x coreaudiod | head -1 || true)"
+    if [[ -n "${new_pid}" && "${new_pid}" != "${old_pid}" ]]; then
+      return 0
+    fi
+    if [[ -z "${old_pid}" && -n "${new_pid}" ]]; then
+      return 0
+    fi
+    # Old process still exiting — keep waiting; do not escalate to SIGKILL.
+    sleep 0.25
+  done
+  echo "warning: coreaudiod did not respawn cleanly (old=${old_pid:-none} new=${new_pid:-none})" >&2
+}
+
+# launchctl "state = running" is not enough — a wedged agent stays "running" while
+# blocked forever inside CoreAudio HAL init (no status item; lock held so companion
+# handoff also fails). Require a startup log line printed after nib/UI setup begins.
+agent_log_ready_since_marker() {
+  local log="$1"
+  local marker="$2"
+  # awk avoids macOS BSD grep quirks with -A / -- option ordering.
+  awk -v marker="${marker}" '
+    $0 == marker { seen = 1; next }
+    seen && /starting in --agent mode|agent playthrough host ready|Permission denied|grant Microphone access/ {
+      found = 1
+      exit
+    }
+    END { exit found ? 0 : 1 }
+  ' "${log}" 2>/dev/null
+}
+
+start_agent_and_verify() {
+  local uid="$1"
+  local plist="$2"
+  local service="gui/${uid}/${AGENT_LABEL}"
+  local log="/tmp/novalink-passthrough-agent.log"
+  local attempt marker ready i
+
+  for attempt in 1 2; do
+    marker="==== novalink-install $(date '+%Y-%m-%d %H:%M:%S') attempt ${attempt} ===="
+    echo "${marker}" >>"${log}" 2>/dev/null || true
+
+    if ! bootstrap_or_kickstart_agent "${uid}" "${plist}"; then
+      return 1
+    fi
+
+    ready=0
+    for i in $(seq 1 50); do
+      if launchctl print "${service}" 2>/dev/null | grep -q 'state = running' \
+          && agent_log_ready_since_marker "${log}" "${marker}"; then
+        ready=1
+        break
+      fi
+      sleep 0.5
+    done
+
+    if [[ "${ready}" -eq 1 ]]; then
+      return 0
+    fi
+
+    echo "warning: PassthroughAgent running but not ready. Stopping it and retrying once." >&2
+    echo "         (Not restarting coreaudiod again — that pegs CPU.)" >&2
+    bootout_agent_for_uid "${uid}" "${plist}"
+    sleep 2
+  done
+
+  echo "error: PassthroughAgent did not become ready" >&2
+  launchctl print "${service}" 2>&1 | head -40 || true
+  echo "---- ${log} ----" >&2
+  tail -60 "${log}" 2>&1 || true
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -402,14 +585,19 @@ if [[ "${UNINSTALL_ONLY}" == true ]]; then
     restart_coreaudiod
   fi
 else
-  # Driver/helper/app first, recycle audio services, THEN start the agent so it
-  # attaches to the freshly restarted HAL/XPC stack.
+  # Stop agent first so coreaudiod is not recycling under a live HAL client.
+  bootout_agent_for_uid "$(id -u)" "${HOME}/Library/LaunchAgents/${AGENT_PLIST_NAME}"
+
   install_driver
   install_helper
   install_app
   if [[ "${RESTART_SERVICES}" == true ]]; then
-    restart_helper
+    # Order matters: recycle audio first, then helper, then agent.
+    # Helper/agent attaching during coreaudiod plugin load causes CPU spikes.
     restart_coreaudiod
+    wait_for_coreaudiod_and_novalink_hal
+    restart_helper
+    sleep 1
   fi
   install_agent
 fi
@@ -417,7 +605,7 @@ fi
 echo
 echo "$(bold "Done.")"
 if [[ "${UNINSTALL_ONLY}" != true ]]; then
-  echo "Background agent hosts passthrough (no companion UI required)."
+  echo "Background agent hosts passthrough (status bar icon; companion window optional)."
   echo "Verify:"
   echo "  launchctl print gui/\$(id -u)/${AGENT_LABEL} | grep state"
   echo "  tail -f /tmp/novalink-passthrough-agent.log"

@@ -64,6 +64,10 @@ static CGFloat const kVolumeIconAdditionalVerticalPadding = 0.075;
     if ((self = [super init])) {
         statusBarItem =
                 [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
+        // LaunchAgent / early awakeFromNib: item can be created but not shown until marked visible.
+        if (@available(macOS 10.12, *)) {
+            statusBarItem.visible = YES;
+        }
 
         audioDevices = devices;
         userDefaults = defaults;
@@ -137,25 +141,52 @@ static CGFloat const kVolumeIconAdditionalVerticalPadding = 0.075;
         volumeIcon3SoundWaves = [NSImage imageNamed:@"Volume3"];
     }
 
-    // Set the icons' sizes.
-    NSRect statusBarItemFrame;
+    [self applyIconSizes];
 
+    // Make the icons "template images" so they get drawn colour-inverted when they're highlighted
+    // or the system is in dark mode.
+    [fermataIcon setTemplate:YES];
+    [volumeIcon0SoundWaves setTemplate:YES];
+    [volumeIcon1SoundWave setTemplate:YES];
+    [volumeIcon2SoundWaves setTemplate:YES];
+    [volumeIcon3SoundWaves setTemplate:YES];
+}
+
+- (CGFloat) statusBarIconHeight {
+    // LaunchAgent awakeFromNib often runs before the status item has a real button frame
+    // (height 0). Sizing icons to 0 makes the companion menu-bar extra invisible even though
+    // the NSStatusItem exists — user only sees the system orange mic indicator.
+    NSRect statusBarItemFrame = NSZeroRect;
     if ([NovaLINKStatusBarItem buttonAvailable]) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wpartial-availability"
         statusBarItemFrame = statusBarItem.button.frame;
 #pragma clang diagnostic pop
     } else {
-        // OS X 10.9 fallback. I haven't tested this (or anything else on 10.9).
         statusBarItemFrame = statusBarItem.view.frame;
     }
 
-    CGFloat heightMinusPadding = statusBarItemFrame.size.height * (1 - kStatusBarIconPadding);
+    CGFloat height = statusBarItemFrame.size.height;
+    if (height < 1.0) {
+        height = [NSStatusBar systemStatusBar].thickness;
+    }
+    if (height < 1.0) {
+        height = 22.0;
+    }
+    return height * (1.0 - kStatusBarIconPadding);
+}
 
-    // The fermata icon has equal width and height.
-    [fermataIcon setSize:NSMakeSize(heightMinusPadding, heightMinusPadding)];
+- (void) applyIconSizes {
+    CGFloat heightMinusPadding = [self statusBarIconHeight];
 
-    // The volume icons are all the same width and height.
+    if (fermataIcon) {
+        [fermataIcon setSize:NSMakeSize(heightMinusPadding, heightMinusPadding)];
+    }
+
+    if (!volumeIcon0SoundWaves || volumeIcon0SoundWaves.size.height < 0.5) {
+        return;
+    }
+
     CGFloat volumeIconWidthToHeightRatio =
             volumeIcon0SoundWaves.size.width / volumeIcon0SoundWaves.size.height;
     CGFloat volumeIconWidth = heightMinusPadding * volumeIconWidthToHeightRatio;
@@ -165,14 +196,16 @@ static CGFloat const kVolumeIconAdditionalVerticalPadding = 0.075;
     [volumeIcon1SoundWave setSize:NSMakeSize(volumeIconWidth, volumeIconHeight)];
     [volumeIcon2SoundWaves setSize:NSMakeSize(volumeIconWidth, volumeIconHeight)];
     [volumeIcon3SoundWaves setSize:NSMakeSize(volumeIconWidth, volumeIconHeight)];
+}
 
-    // Make the icons "template images" so they get drawn colour-inverted when they're highlighted
-    // or the system is in dark mode.
-    [fermataIcon setTemplate:YES];
-    [volumeIcon0SoundWaves setTemplate:YES];
-    [volumeIcon1SoundWave setTemplate:YES];
-    [volumeIcon2SoundWaves setTemplate:YES];
-    [volumeIcon3SoundWaves setTemplate:YES];
+- (void) ensureVisible {
+    if (@available(macOS 10.12, *)) {
+        statusBarItem.visible = YES;
+    }
+    [self applyIconSizes];
+    // Re-assign image so AppKit picks up non-zero sizes after the button laid out.
+    NovaLINKStatusBarIcon current = _icon;
+    self.icon = current;
 }
 
 #pragma mark Accessors

@@ -62,6 +62,10 @@ static NovaLINKStatusBarIcon const kNovaLINKStatusBarIconDefaultValue = NovaLINK
 // shown in the main menu.
 - (void) setDebugLoggingMenuItem:(NovaLINKDebugLoggingMenuItem*)menuItem;
 
+// Re-assert visibility and icon size. Needed for LaunchAgent launches where the status item
+// button frame is still zero during awakeFromNib (icon ends up 0×0 / invisible).
+- (void) ensureVisible;
+
 @end
 
 #pragma clang assume_nonnull end

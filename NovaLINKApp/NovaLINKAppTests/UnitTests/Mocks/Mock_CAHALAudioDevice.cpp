@@ -126,7 +126,8 @@ CFURLRef	CAHALAudioDevice::CopyIconLocation() const
 
 UInt32	CAHALAudioDevice::GetTransportType() const
 {
-    Throw(new CAException(kAudio_UnimplementedError));
+    // Default to built-in so PlayThrough Activate() can query transport without throwing.
+    return kAudioDeviceTransportTypeBuiltIn;
 }
 
 bool	CAHALAudioDevice::CanBeDefaultDevice(bool inIsInput, bool inIsSystem) const

@@ -131,6 +131,11 @@ void    NovaLINKPlayThrough::Activate()
         // shows up as YouTube playing in slow-motion then suddenly catching up after the next
         // device switch. Try to drive the real output at NovaLINK's rate first; only change NovaLINK
         // when the output can't follow.
+        //
+        // Exception: Bluetooth / BLE / AirPlay often accept SetNominalSampleRate (or update
+        // Nominal) while Actual stays at another rate (commonly 44.1 kHz). PlayThrough has no
+        // resampler, so that mismatch plays as slow / "monster" audio. Those transports must
+        // remain the rate master — always match NovaLINK to them.
         const bool clientsPlaying = [&]() -> bool {
             try {
                 return mInputDevice.IsNovaLINKDeviceInstance()
@@ -140,15 +145,54 @@ void    NovaLINKPlayThrough::Activate()
             }
         }();
 
+        const bool outputMustBeRateMaster = [&]() -> bool {
+            try {
+                switch(mOutputDevice.GetTransportType())
+                {
+                    case kAudioDeviceTransportTypeBluetooth:
+                    case kAudioDeviceTransportTypeBluetoothLE:
+                    case kAudioDeviceTransportTypeAirPlay:
+                        return true;
+                    default:
+                        return false;
+                }
+            } catch (...) {
+                return false;
+            }
+        }();
+
         try
         {
             Float64 outputSampleRate = mOutputDevice.GetNominalSampleRate();
+            // BT/AirPlay Nominal can disagree with the hardware clock. Prefer Actual when known.
+            if(outputMustBeRateMaster)
+            {
+                try
+                {
+                    const Float64 outputActual = mOutputDevice.GetActualSampleRate();
+                    if(outputActual > 1.0
+                       && std::fabs(outputActual - outputSampleRate) > 0.5)
+                    {
+                        DebugMsg("NovaLINKPlayThrough::Activate: Using output Actual sample rate "
+                                 "%.0f (Nominal was %.0f)",
+                                 outputActual,
+                                 outputSampleRate);
+                        outputSampleRate = outputActual;
+                    }
+                }
+                catch (...)
+                {
+                    // Actual may be unavailable before IO; keep Nominal.
+                }
+            }
+
             Float64 inputSampleRate = mInputDevice.GetNominalSampleRate();
 
             if(std::fabs(outputSampleRate - inputSampleRate) > 0.5)
             {
-                if(clientsPlaying)
+                if(clientsPlaying && !outputMustBeRateMaster)
                 {
+                    bool matchedOutputToNovaLINK = false;
                     try
                     {
                         DebugMsg("NovaLINKPlayThrough::Activate: Clients playing — matching output "
@@ -156,6 +200,22 @@ void    NovaLINKPlayThrough::Activate()
                                  outputSampleRate,
                                  inputSampleRate);
                         mOutputDevice.SetNominalSampleRate(inputSampleRate);
+
+                        // Some devices "succeed" without actually changing rate.
+                        // Re-read Nominal; if it didn't stick, fall back to matching NovaLINK.
+                        const Float64 outputAfterSet = mOutputDevice.GetNominalSampleRate();
+                        if(std::fabs(outputAfterSet - inputSampleRate) <= 0.5)
+                        {
+                            matchedOutputToNovaLINK = true;
+                        }
+                        else
+                        {
+                            LogWarning("NovaLINKPlayThrough::Activate: Output Nominal stayed at %f "
+                                       "after requesting %f; matching NovaLINK to output instead",
+                                       outputAfterSet,
+                                       inputSampleRate);
+                            outputSampleRate = outputAfterSet;
+                        }
                     }
                     catch (CAException e)
                     {
@@ -164,11 +224,22 @@ void    NovaLINKPlayThrough::Activate()
                                    inputSampleRate,
                                    e.GetError(),
                                    outputSampleRate);
+                    }
+
+                    if(!matchedOutputToNovaLINK)
+                    {
                         mInputDevice.SetNominalSampleRate(outputSampleRate);
                     }
                 }
                 else
                 {
+                    if(outputMustBeRateMaster)
+                    {
+                        DebugMsg("NovaLINKPlayThrough::Activate: Output transport requires rate "
+                                 "master — matching NovaLINK (%.0f) to output (%.0f)",
+                                 inputSampleRate,
+                                 outputSampleRate);
+                    }
                     mInputDevice.SetNominalSampleRate(outputSampleRate);
                 }
             }
@@ -187,11 +258,24 @@ void    NovaLINKPlayThrough::Activate()
 
             if(outputBufferSize != inputBufferSize)
             {
-                if(clientsPlaying)
+                if(clientsPlaying && !outputMustBeRateMaster)
                 {
+                    bool matchedOutputToNovaLINK = false;
                     try
                     {
                         mOutputDevice.SetIOBufferSize(inputBufferSize);
+                        if(mOutputDevice.GetIOBufferSize() == inputBufferSize)
+                        {
+                            matchedOutputToNovaLINK = true;
+                        }
+                        else
+                        {
+                            outputBufferSize = mOutputDevice.GetIOBufferSize();
+                            LogWarning("NovaLINKPlayThrough::Activate: Output buffer size stayed "
+                                       "at %u after requesting %u; matching NovaLINK instead",
+                                       outputBufferSize,
+                                       inputBufferSize);
+                        }
                     }
                     catch (CAException e)
                     {
@@ -200,6 +284,10 @@ void    NovaLINKPlayThrough::Activate()
                                    inputBufferSize,
                                    e.GetError(),
                                    outputBufferSize);
+                    }
+
+                    if(!matchedOutputToNovaLINK)
+                    {
                         mInputDevice.SetIOBufferSize(outputBufferSize);
                     }
                 }
@@ -1002,7 +1090,9 @@ void    NovaLINKPlayThrough::StopIfIdle()
 
 #pragma mark NovaLINKDevice Listener
 
-// TODO: Listen for changes to the sample rate and IO buffer size of the output device and update the input device to match
+// TODO: Listen for changes to the sample rate and IO buffer size of the output device and update
+//       the input device to match. Especially important for Bluetooth, which can renegotiate rate
+//       after StartIO / codec switches — without a listener, playthrough stays pitch-shifted.
 
 // static
 OSStatus    NovaLINKPlayThrough::NovaLINKDeviceListenerProc(AudioObjectID inObjectID,
