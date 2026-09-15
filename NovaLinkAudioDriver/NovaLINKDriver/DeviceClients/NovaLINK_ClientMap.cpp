@@ -200,8 +200,25 @@ void    NovaLINK_ClientMap::UpdateClientIOStateNonRT(UInt32 inClientID, bool inD
     CAMutex::Locker theShadowMapsLocker(mShadowMapsMutex);
     
     mClientMapShadow[inClientID].mDoingIO = inDoingIO;
+    if(!inDoingIO)
+    {
+        mClientMapShadow[inClientID].mDoingInputIO = false;
+    }
     SwapInShadowMaps();
     mClientMapShadow[inClientID].mDoingIO = inDoingIO;
+    if(!inDoingIO)
+    {
+        mClientMapShadow[inClientID].mDoingInputIO = false;
+    }
+}
+
+void    NovaLINK_ClientMap::StartInputIONonRT(UInt32 inClientID)
+{
+    CAMutex::Locker theShadowMapsLocker(mShadowMapsMutex);
+
+    mClientMapShadow[inClientID].mDoingInputIO = true;
+    SwapInShadowMaps();
+    mClientMapShadow[inClientID].mDoingInputIO = true;
 }
 
 void    NovaLINK_ClientMap::SwapInShadowMaps()

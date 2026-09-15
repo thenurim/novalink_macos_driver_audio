@@ -3,6 +3,7 @@
 // Captures a real hardware microphone and injects its PCM into NovaLINKDevice so that
 // clients reading the virtual input (Zoom, OBS, …) receive desktop audio + mic mixed.
 // Local playthrough hosts still hear desktop-only (see driver ReadInput mix rules).
+// Hardware mic IO is demand-driven via kAudioDeviceCustomPropertyInputIsRunningSomewhereOtherThanPassthroughHost.
 
 // Self Include
 #import "NovaLINKMicInputMixer.h"
@@ -109,11 +110,14 @@ BOOL IsBuiltInTransport(const NovaLINKAudioDevice& device)
     BOOL _running;
     AudioObjectID _micDeviceID;
     AudioObjectID _novaLINKDeviceID;
+    AudioObjectID _monitoredNovaLINKDeviceID;
     AudioDeviceIOProcID _ioProcID;
     AudioConverterRef _converter;
     AudioStreamBasicDescription _micFormat;
     AudioStreamBasicDescription _injectFormat;
     dispatch_queue_t _injectQueue;
+    dispatch_queue_t _demandQueue;
+    AudioObjectPropertyListenerBlock _demandListener;
     Float64 _novaLINKSampleRate;
 }
 
@@ -132,11 +136,15 @@ BOOL IsBuiltInTransport(const NovaLINKAudioDevice& device)
         _running = NO;
         _micDeviceID = kAudioObjectUnknown;
         _novaLINKDeviceID = kAudioObjectUnknown;
+        _monitoredNovaLINKDeviceID = kAudioObjectUnknown;
         _ioProcID = nullptr;
         _converter = nullptr;
         _novaLINKSampleRate = 44100.0;
         _injectQueue = dispatch_queue_create("life.thenurim.novalink.MicInject",
                                              DISPATCH_QUEUE_SERIAL);
+        _demandQueue = dispatch_queue_create("life.thenurim.novalink.MicDemand",
+                                             DISPATCH_QUEUE_SERIAL);
+        _demandListener = nil;
         memset(&_micFormat, 0, sizeof(_micFormat));
         memset(&_injectFormat, 0, sizeof(_injectFormat));
     }
@@ -367,31 +375,6 @@ static OSStatus MicInputIOProc(AudioObjectID,
     CFRelease(data);
 }
 
-- (void) stopLocked {
-    _running = NO;
-
-    // Drain pending convert/inject work before tearing down the converter.
-    if (_injectQueue) {
-        dispatch_sync(_injectQueue, ^{});
-    }
-
-    if (_ioProcID != nullptr && _micDeviceID != kAudioObjectUnknown) {
-        NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
-            NovaLINKAudioDevice micDevice(_micDeviceID);
-            micDevice.StopIOProc(_ioProcID);
-            micDevice.DestroyIOProcID(_ioProcID);
-        });
-        _ioProcID = nullptr;
-    }
-
-    if (_converter) {
-        AudioConverterDispose(_converter);
-        _converter = nullptr;
-    }
-
-    _micDeviceID = kAudioObjectUnknown;
-}
-
 - (BOOL) startLocked {
     if (![self prepareDevicesLocked]) {
         return NO;
@@ -415,7 +398,7 @@ static OSStatus MicInputIOProc(AudioObjectID,
         return YES;
     } catch (const CAException& e) {
         LogError("NovaLINKMicInputMixer: Failed to start mic IO (%d)", e.GetError());
-        [self stopLocked];
+        [self stopIOLocked];
         return NO;
     }
 }
@@ -443,7 +426,7 @@ static OSStatus MicInputIOProc(AudioObjectID,
     if (![NovaLINKMicrophoneAccess isAuthorized]) {
         [NovaLINKMicrophoneAccess requestAccessIfNeededWithCompletion:^(BOOL granted) {
             if (granted) {
-                [[NovaLINKMicInputMixer sharedInstance] ensureStarted];
+                [[NovaLINKMicInputMixer sharedInstance] syncToCaptureDemand];
             }
         }];
         return;
@@ -457,14 +440,134 @@ static OSStatus MicInputIOProc(AudioObjectID,
             return;
         }
 
-        [self stopLocked];
+        [self stopIOLocked];
         [self startLocked];
     }
 }
 
+- (BOOL) isCaptureDemanded {
+    BOOL demanded = NO;
+    NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+        NovaLINKDevice novaLINKDevice;
+        AudioObjectID novaID = novaLINKDevice.GetObjectID();
+        if (novaID == kAudioObjectUnknown) {
+            return;
+        }
+        NovaLINKAudioDevice device(novaID);
+        if (!device.HasProperty(kNovaLINKInputRunningSomewhereOtherThanPassthroughHostAddress)) {
+            return;
+        }
+        CFTypeRef value = device.GetPropertyData_CFType(
+                kNovaLINKInputRunningSomewhereOtherThanPassthroughHostAddress);
+        if (value != nullptr) {
+            demanded = CFBooleanGetValue(static_cast<CFBooleanRef>(value));
+        }
+    });
+    return demanded;
+}
+
+- (void) syncToCaptureDemand {
+    if ([self isCaptureDemanded]) {
+        DebugMsg("NovaLINKMicInputMixer: Capture client reading NovaLINK input — ensuring mic inject");
+        [self ensureStarted];
+    } else {
+        DebugMsg("NovaLINKMicInputMixer: No capture client — stopping mic inject");
+        @synchronized (_lock) {
+            [self stopIOLocked];
+        }
+    }
+}
+
+- (void) installDemandListenerOnDevice:(AudioObjectID)novaID {
+    if (novaID == kAudioObjectUnknown) {
+        return;
+    }
+
+    if (_monitoredNovaLINKDeviceID == novaID && _demandListener != nil) {
+        return;
+    }
+
+    [self removeDemandListener];
+
+    __weak NovaLINKMicInputMixer* weakSelf = self;
+    _demandListener = ^(UInt32, const AudioObjectPropertyAddress*) {
+        NovaLINKMicInputMixer* strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
+        [strongSelf syncToCaptureDemand];
+    };
+
+    NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+        NovaLINKAudioDevice device(novaID);
+        device.AddPropertyListenerBlock(
+                kNovaLINKInputRunningSomewhereOtherThanPassthroughHostAddress,
+                _demandQueue,
+                _demandListener);
+        _monitoredNovaLINKDeviceID = novaID;
+        DebugMsg("NovaLINKMicInputMixer: Demand monitoring on NovaLINK device %u", novaID);
+    });
+}
+
+- (void) removeDemandListener {
+    if (_demandListener == nil || _monitoredNovaLINKDeviceID == kAudioObjectUnknown) {
+        _demandListener = nil;
+        _monitoredNovaLINKDeviceID = kAudioObjectUnknown;
+        return;
+    }
+
+    AudioObjectPropertyListenerBlock listener = _demandListener;
+    AudioObjectID deviceID = _monitoredNovaLINKDeviceID;
+    _demandListener = nil;
+    _monitoredNovaLINKDeviceID = kAudioObjectUnknown;
+
+    NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+        NovaLINKAudioDevice device(deviceID);
+        device.RemovePropertyListenerBlock(
+                kNovaLINKInputRunningSomewhereOtherThanPassthroughHostAddress,
+                _demandQueue,
+                listener);
+    });
+}
+
+- (void) startDemandMonitoring {
+    NovaLINKDevice novaLINKDevice;
+    AudioObjectID novaID = novaLINKDevice.GetObjectID();
+    [self installDemandListenerOnDevice:novaID];
+    [self syncToCaptureDemand];
+}
+
+- (void) stopIOLocked {
+    _running = NO;
+
+    // Drain pending convert/inject work before tearing down the converter.
+    if (_injectQueue) {
+        dispatch_sync(_injectQueue, ^{});
+    }
+
+    if (_ioProcID != nullptr && _micDeviceID != kAudioObjectUnknown) {
+        NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+            NovaLINKAudioDevice micDevice(_micDeviceID);
+            micDevice.StopIOProc(_ioProcID);
+            micDevice.DestroyIOProcID(_ioProcID);
+        });
+        _ioProcID = nullptr;
+    }
+
+    if (_converter) {
+        AudioConverterDispose(_converter);
+        _converter = nullptr;
+    }
+
+    _micDeviceID = kAudioObjectUnknown;
+}
+
 - (void) stop {
+    // Remove the listener outside `_lock` — RemovePropertyListenerBlock waits for in-flight
+    // callbacks, and those callbacks take `_lock` in syncToCaptureDemand.
+    [self removeDemandListener];
     @synchronized (_lock) {
-        [self stopLocked];
+        [self stopIOLocked];
     }
 }
 

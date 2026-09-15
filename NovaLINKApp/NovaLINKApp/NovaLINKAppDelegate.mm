@@ -249,6 +249,8 @@ static NSString* const kPassthroughAgentLabel = @"life.thenurim.novalink.Passthr
         });
         // If clients are already writing to NovaLINK (user selected it before the agent
         // finished launching), kick playthrough without waiting for another StartIO/XPC edge.
+        // PlayThrough::Start no-ops when no non-App clients are present, so this will not
+        // light the microphone privacy indicator on a cold launch.
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             OSStatus errMain = [self->audioDevices startPlayThroughSync:NO];

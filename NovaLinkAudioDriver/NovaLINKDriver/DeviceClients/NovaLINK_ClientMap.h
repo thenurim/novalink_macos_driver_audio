@@ -109,6 +109,7 @@ private:
 public:
     void                                                StartIONonRT(UInt32 inClientID) { UpdateClientIOStateNonRT(inClientID, true); }
     void                                                StopIONonRT(UInt32 inClientID) { UpdateClientIOStateNonRT(inClientID, false); }
+    void                                                StartInputIONonRT(UInt32 inClientID);
     
 private:
     void                                                UpdateClientIOStateNonRT(UInt32 inClientID, bool inDoingIO);

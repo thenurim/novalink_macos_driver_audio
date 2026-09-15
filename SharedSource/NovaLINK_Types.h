@@ -113,6 +113,11 @@ enum
     // A CFBoolean similar to kAudioDevicePropertyDeviceIsRunning except it ignores whether IO is running for
     // NovaLINKApp. This is so NovaLINKApp knows when it can stop doing IO to save CPU.
     kAudioDeviceCustomPropertyDeviceIsRunningSomewhereOtherThanNovaLINKApp = 'runo',
+    // A CFBoolean that is true when a non-passthrough client is reading NovaLINKDevice's *input*
+    // (e.g. Zoom/OBS). Output-only clients (Chrome playing to NovaLINK) do not set this. Used by
+    // NovaLINKApp to start hardware-mic inject only while capture clients need it — avoids keeping
+    // the macOS microphone privacy indicator on permanently.
+    kAudioDeviceCustomPropertyInputIsRunningSomewhereOtherThanPassthroughHost = 'irin',
     // A CFArray of CFBooleans indicating which of NovaLINKDevice's controls are enabled. All controls are enabled
     // by default. This property is settable. See the array indices below for more info.
     kAudioDeviceCustomPropertyEnabledOutputControls                   = 'bgct',
@@ -171,6 +176,12 @@ static const AudioObjectPropertyAddress kNovaLINKAudibleStateAddress = {
 
 static const AudioObjectPropertyAddress kNovaLINKRunningSomewhereOtherThanNovaLINKAppAddress = {
     kAudioDeviceCustomPropertyDeviceIsRunningSomewhereOtherThanNovaLINKApp,
+    kAudioObjectPropertyScopeGlobal,
+    kAudioObjectPropertyElementMaster
+};
+
+static const AudioObjectPropertyAddress kNovaLINKInputRunningSomewhereOtherThanPassthroughHostAddress = {
+    kAudioDeviceCustomPropertyInputIsRunningSomewhereOtherThanPassthroughHost,
     kAudioObjectPropertyScopeGlobal,
     kAudioObjectPropertyElementMaster
 };

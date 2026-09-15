@@ -71,13 +71,20 @@ private:
     // avoid race conditions. If these methods could be called directly those calls would skip any queued calls.
     bool                                StartIONonRT(UInt32 inClientID);
     bool                                StopIONonRT(UInt32 inClientID);
+    // Marks that a client has begun reading input (ReadInput). Idempotent per IO session.
+    void                                StartInputIONonRT(UInt32 inClientID);
 
 public:
     bool                                ClientsRunningIO() const;
     bool                                ClientsOtherThanNovaLINKAppRunningIO() const;
+    bool                                ClientsOtherThanPassthroughHostReadingInput() const;
+    // Real-time safe: true if this client should be marked as reading input (not yet marked).
+    bool                                ClientShouldMarkInputIORT(UInt32 inClientID) const;
     
 private:
-    void                                SendIORunningNotifications(bool sendIsRunningNotification, bool sendIsRunningSomewhereOtherThanNovaLINKAppNotification) const;
+    void                                SendIORunningNotifications(bool sendIsRunningNotification,
+                                                                   bool sendIsRunningSomewhereOtherThanNovaLINKAppNotification,
+                                                                   bool sendInputRunningSomewhereOtherThanPassthroughHostNotification) const;
 public:
     bool                                IsNovaLINKApp(UInt32 inClientID) const { return inClientID == mNovaLINKAppClientID; }
     bool                                IsXPCHelper(UInt32 inClientID) const { return inClientID == mXPCHelperClientID; }
@@ -108,6 +115,8 @@ private:
     // stop.
     UInt64                              mStartCount = 0;
     UInt64                              mStartCountExcludingNovaLINKApp = 0;
+    // Non-passthrough clients that have performed ReadInput in their current IO session.
+    UInt64                              mInputStartCountExcludingPassthrough = 0;
     
     CAMutex                             mMutex { "Clients" };
     

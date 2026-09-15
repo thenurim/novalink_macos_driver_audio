@@ -68,6 +68,7 @@ private:
         // Non-realtime thread only
         kNovaLINKTaskStartClientIO,
         kNovaLINKTaskStopClientIO,
+        kNovaLINKTaskStartClientInputIO,
         kNovaLINKTaskSendPropertyNotification
     };
     
@@ -127,6 +128,7 @@ public:
     
     inline void                         QueueAsync_StartClientIO(NovaLINK_Clients* inClients, UInt32 inClientID) { Queue_UpdateClientIOState(false, inClients, inClientID, true); }
     inline void                         QueueAsync_StopClientIO(NovaLINK_Clients* inClients, UInt32 inClientID) { Queue_UpdateClientIOState(false, inClients, inClientID, false); }
+    void                                QueueAsync_StartClientInputIO(NovaLINK_Clients* inClients, UInt32 inClientID);
     
 private:
     bool                                Queue_UpdateClientIOState(bool inSync, NovaLINK_Clients* inClients, UInt32 inClientID, bool inDoingIO);

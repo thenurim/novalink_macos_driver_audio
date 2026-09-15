@@ -3,6 +3,10 @@
 // Captures a real hardware microphone and injects its PCM into NovaLINKDevice so that
 // clients reading the virtual input (Zoom, OBS, …) receive desktop audio + mic mixed.
 // Local playthrough hosts still hear desktop-only (see driver ReadInput mix rules).
+//
+// Hardware mic IO is demand-driven: started only while a non-passthrough client is
+// reading NovaLINK input (custom property 'irin'), so the macOS microphone privacy
+// indicator is not left on permanently.
 
 #ifndef NovaLINKApp__NovaLINKMicInputMixer
 #define NovaLINKApp__NovaLINKMicInputMixer
@@ -16,12 +20,15 @@
 
 + (instancetype) sharedInstance;
 
-// Start capturing (or keep capturing) a non-NovaLINK input and inject into NovaLINKDevice.
-// No-ops when already running against the same mic / sample rate — avoids tearing down
-// CoreAudio input IO (which can re-trigger stacked Microphone TCC dialogs).
-- (void) ensureStarted;
+// Listen for capture-client demand on NovaLINKDevice and start/stop accordingly.
+// Safe to call more than once.
+- (void) startDemandMonitoring;
 
-// Force stop.
+// Re-evaluate demand (e.g. after output/sample-rate changes). Starts only if a
+// capture client is reading NovaLINK input; otherwise stops.
+- (void) syncToCaptureDemand;
+
+// Force stop and tear down the demand listener (process teardown).
 - (void) stop;
 
 @end

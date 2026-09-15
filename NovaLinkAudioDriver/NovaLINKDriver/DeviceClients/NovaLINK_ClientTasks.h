@@ -44,6 +44,7 @@ class NovaLINK_ClientTasks
 private:
     static bool                            StartIONonRT(NovaLINK_Clients* inClients, UInt32 inClientID) { return inClients->StartIONonRT(inClientID); }
     static bool                            StopIONonRT(NovaLINK_Clients* inClients, UInt32 inClientID) { return inClients->StopIONonRT(inClientID); }
+    static void                            StartInputIONonRT(NovaLINK_Clients* inClients, UInt32 inClientID) { inClients->StartInputIONonRT(inClientID); }
     
     static void                            SwapInShadowMapsRT(NovaLINK_ClientMap* inClientMap) { inClientMap->SwapInShadowMapsRT(); }
     

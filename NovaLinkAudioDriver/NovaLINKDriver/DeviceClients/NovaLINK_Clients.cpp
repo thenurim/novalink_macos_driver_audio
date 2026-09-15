@@ -147,7 +147,9 @@ bool    NovaLINK_Clients::StartIONonRT(UInt32 inClientID)
            (mStartCount - mStartCountExcludingNovaLINKApp) <= 2,
            "mStartCount and mStartCountExcludingNovaLINKApp are out of sync");
     
-    SendIORunningNotifications(sendIsRunningNotification, sendIsRunningSomewhereOtherThanNovaLINKAppNotification);
+    SendIORunningNotifications(sendIsRunningNotification,
+                               sendIsRunningSomewhereOtherThanNovaLINKAppNotification,
+                               false);
 
     return didStartIO;
 }
@@ -165,6 +167,7 @@ bool    NovaLINK_Clients::StopIONonRT(UInt32 inClientID)
     
     bool sendIsRunningNotification = false;
     bool sendIsRunningSomewhereOtherThanNovaLINKAppNotification = false;
+    bool sendInputRunningSomewhereOtherThanPassthroughHostNotification = false;
     
     if(theClient.mDoingIO)
     {
@@ -172,6 +175,8 @@ bool    NovaLINK_Clients::StopIONonRT(UInt32 inClientID)
                  inClientID,
                  CFStringGetCStringPtr(theClient.mBundleID.GetCFString(), kCFStringEncodingUTF8),
                  theClient.mProcessID);
+
+        const bool wasDoingInputIO = theClient.mDoingInputIO;
         
         mClientMap.StopIONonRT(inClientID);
         
@@ -190,6 +195,18 @@ bool    NovaLINK_Clients::StopIONonRT(UInt32 inClientID)
             {
                 sendIsRunningSomewhereOtherThanNovaLINKAppNotification = true;
             }
+
+            if(wasDoingInputIO)
+            {
+                ThrowIf(mInputStartCountExcludingPassthrough <= 0,
+                        CAException(kAudioHardwareIllegalOperationError),
+                        "NovaLINK_Clients::StopIO: Underflowed mInputStartCountExcludingPassthrough");
+                mInputStartCountExcludingPassthrough--;
+                if(mInputStartCountExcludingPassthrough == 0)
+                {
+                    sendInputRunningSomewhereOtherThanPassthroughHostNotification = true;
+                }
+            }
         }
         
         // Return true if we stopped IO entirely (i.e. there are no clients still running IO)
@@ -200,10 +217,45 @@ bool    NovaLINK_Clients::StopIONonRT(UInt32 inClientID)
     Assert(mStartCountExcludingNovaLINKApp <= mStartCount &&
            (mStartCount - mStartCountExcludingNovaLINKApp) <= 2,
            "mStartCount and mStartCountExcludingNovaLINKApp are out of sync");
+    Assert(mInputStartCountExcludingPassthrough <= mStartCountExcludingNovaLINKApp,
+           "mInputStartCountExcludingPassthrough and mStartCountExcludingNovaLINKApp are out of sync");
     
-    SendIORunningNotifications(sendIsRunningNotification, sendIsRunningSomewhereOtherThanNovaLINKAppNotification);
+    SendIORunningNotifications(sendIsRunningNotification,
+                               sendIsRunningSomewhereOtherThanNovaLINKAppNotification,
+                               sendInputRunningSomewhereOtherThanPassthroughHostNotification);
     
     return didStopIO;
+}
+
+void    NovaLINK_Clients::StartInputIONonRT(UInt32 inClientID)
+{
+    CAMutex::Locker theLocker(mMutex);
+
+    NovaLINK_Client theClient;
+    bool didFindClient = mClientMap.GetClientNonRT(inClientID, &theClient);
+    ThrowIf(!didFindClient,
+            NovaLINK_InvalidClientException(),
+            "NovaLINK_Clients::StartInputIO: Cannot mark input IO for client that was never added");
+
+    if(!theClient.mDoingIO || theClient.mDoingInputIO || IsPassthroughHost(inClientID))
+    {
+        return;
+    }
+
+    ThrowIf(mInputStartCountExcludingPassthrough == UINT64_MAX,
+            CAException(kAudioHardwareIllegalOperationError),
+            "NovaLINK_Clients::StartInputIO: mInputStartCountExcludingPassthrough maxxed out");
+
+    DebugMsg("NovaLINK_Clients::StartInputIO: Client %u (%s, %d) reading input",
+             inClientID,
+             CFStringGetCStringPtr(theClient.mBundleID.GetCFString(), kCFStringEncodingUTF8),
+             theClient.mProcessID);
+
+    mClientMap.StartInputIONonRT(inClientID);
+    mInputStartCountExcludingPassthrough++;
+
+    const bool becameActive = (mInputStartCountExcludingPassthrough == 1);
+    SendIORunningNotifications(false, false, becameActive);
 }
 
 bool    NovaLINK_Clients::ClientsRunningIO() const
@@ -216,18 +268,47 @@ bool    NovaLINK_Clients::ClientsOtherThanNovaLINKAppRunningIO() const
     return mStartCountExcludingNovaLINKApp > 0;
 }
 
-void    NovaLINK_Clients::SendIORunningNotifications(bool sendIsRunningNotification, bool sendIsRunningSomewhereOtherThanNovaLINKAppNotification) const
+bool    NovaLINK_Clients::ClientsOtherThanPassthroughHostReadingInput() const
 {
-    if(sendIsRunningNotification || sendIsRunningSomewhereOtherThanNovaLINKAppNotification)
+    return mInputStartCountExcludingPassthrough > 0;
+}
+
+bool    NovaLINK_Clients::ClientShouldMarkInputIORT(UInt32 inClientID) const
+{
+    if(IsPassthroughHost(inClientID))
+    {
+        return false;
+    }
+
+    NovaLINK_Client theClient;
+    if(!mClientMap.GetClientRT(inClientID, &theClient))
+    {
+        return false;
+    }
+
+    return theClient.mDoingIO && !theClient.mDoingInputIO;
+}
+
+void    NovaLINK_Clients::SendIORunningNotifications(bool sendIsRunningNotification,
+                                                     bool sendIsRunningSomewhereOtherThanNovaLINKAppNotification,
+                                                     bool sendInputRunningSomewhereOtherThanPassthroughHostNotification) const
+{
+    if(sendIsRunningNotification ||
+       sendIsRunningSomewhereOtherThanNovaLINKAppNotification ||
+       sendInputRunningSomewhereOtherThanPassthroughHostNotification)
     {
         CADispatchQueue::GetGlobalSerialQueue().Dispatch(false, ^{
-            AudioObjectPropertyAddress theChangedProperties[2];
+            AudioObjectPropertyAddress theChangedProperties[3];
             UInt32 theNotificationCount = 0;
 
             if(sendIsRunningNotification)
             {
                 DebugMsg("NovaLINK_Clients::SendIORunningNotifications: Sending kAudioDevicePropertyDeviceIsRunning");
-                theChangedProperties[0] = { kAudioDevicePropertyDeviceIsRunning, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMaster };
+                theChangedProperties[theNotificationCount] = {
+                    kAudioDevicePropertyDeviceIsRunning,
+                    kAudioObjectPropertyScopeGlobal,
+                    kAudioObjectPropertyElementMaster
+                };
                 theNotificationCount++;
             }
 
@@ -235,6 +316,14 @@ void    NovaLINK_Clients::SendIORunningNotifications(bool sendIsRunningNotificat
             {
                 DebugMsg("NovaLINK_Clients::SendIORunningNotifications: Sending kAudioDeviceCustomPropertyDeviceIsRunningSomewhereOtherThanNovaLINKApp");
                 theChangedProperties[theNotificationCount] = kNovaLINKRunningSomewhereOtherThanNovaLINKAppAddress;
+                theNotificationCount++;
+            }
+
+            if(sendInputRunningSomewhereOtherThanPassthroughHostNotification)
+            {
+                DebugMsg("NovaLINK_Clients::SendIORunningNotifications: Sending kAudioDeviceCustomPropertyInputIsRunningSomewhereOtherThanPassthroughHost");
+                theChangedProperties[theNotificationCount] =
+                        kNovaLINKInputRunningSomewhereOtherThanPassthroughHostAddress;
                 theNotificationCount++;
             }
 

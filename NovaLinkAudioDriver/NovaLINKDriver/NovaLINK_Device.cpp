@@ -339,6 +339,7 @@ bool	NovaLINK_Device::Device_HasProperty(AudioObjectID inObjectID, pid_t inClien
 			theAnswer = true;
 			break;
 
+        case kAudioDeviceCustomPropertyInputIsRunningSomewhereOtherThanPassthroughHost:
         case kAudioDeviceCustomPropertyInjectMicAudio:
 			theAnswer = SupportsMicMix();
 			break;
@@ -379,6 +380,10 @@ bool	NovaLINK_Device::Device_IsPropertySettable(AudioObjectID inObjectID, pid_t 
         case kAudioObjectPropertyCustomPropertyInfoList:
         case kAudioDeviceCustomPropertyDeviceAudibleState:
         case kAudioDeviceCustomPropertyDeviceIsRunningSomewhereOtherThanNovaLINKApp:
+			theAnswer = false;
+			break;
+
+        case kAudioDeviceCustomPropertyInputIsRunningSomewhereOtherThanPassthroughHost:
 			theAnswer = false;
 			break;
             
@@ -476,7 +481,7 @@ UInt32	NovaLINK_Device::Device_GetPropertyDataSize(AudioObjectID inObjectID, pid
             break;
             
         case kAudioObjectPropertyCustomPropertyInfoList:
-            theAnswer = sizeof(AudioServerPlugInCustomPropertyInfo) * (SupportsMicMix() ? 6 : 5);
+            theAnswer = sizeof(AudioServerPlugInCustomPropertyInfo) * (SupportsMicMix() ? 7 : 5);
             break;
             
         case kAudioDeviceCustomPropertyDeviceAudibleState:
@@ -492,6 +497,10 @@ UInt32	NovaLINK_Device::Device_GetPropertyDataSize(AudioObjectID inObjectID, pid
             break;
             
         case kAudioDeviceCustomPropertyDeviceIsRunningSomewhereOtherThanNovaLINKApp:
+            theAnswer = sizeof(CFBooleanRef);
+            break;
+
+        case kAudioDeviceCustomPropertyInputIsRunningSomewhereOtherThanPassthroughHost:
             theAnswer = sizeof(CFBooleanRef);
             break;
 
@@ -904,7 +913,7 @@ void	NovaLINK_Device::Device_GetPropertyData(AudioObjectID inObjectID, pid_t inC
             
             //	clamp it to the number of items we have
             {
-                UInt32 theInfoCount = SupportsMicMix() ? 6 : 5;
+                UInt32 theInfoCount = SupportsMicMix() ? 7 : 5;
                 if(theNumberItemsToFetch > theInfoCount)
                 {
                     theNumberItemsToFetch = theInfoCount;
@@ -947,6 +956,15 @@ void	NovaLINK_Device::Device_GetPropertyData(AudioObjectID inObjectID, pid_t inC
                 ((AudioServerPlugInCustomPropertyInfo*)outData)[5].mPropertyDataType = kAudioServerPlugInCustomPropertyDataTypeCFPropertyList;
                 ((AudioServerPlugInCustomPropertyInfo*)outData)[5].mQualifierDataType = kAudioServerPlugInCustomPropertyDataTypeNone;
             }
+            if(theNumberItemsToFetch > 6)
+            {
+                ((AudioServerPlugInCustomPropertyInfo*)outData)[6].mSelector =
+                        kAudioDeviceCustomPropertyInputIsRunningSomewhereOtherThanPassthroughHost;
+                ((AudioServerPlugInCustomPropertyInfo*)outData)[6].mPropertyDataType =
+                        kAudioServerPlugInCustomPropertyDataTypeCFPropertyList;
+                ((AudioServerPlugInCustomPropertyInfo*)outData)[6].mQualifierDataType =
+                        kAudioServerPlugInCustomPropertyDataTypeNone;
+            }
 
             outDataSize = theNumberItemsToFetch * sizeof(AudioServerPlugInCustomPropertyInfo);
             break;
@@ -985,6 +1003,16 @@ void	NovaLINK_Device::Device_GetPropertyData(AudioObjectID inObjectID, pid_t inC
         case kAudioDeviceCustomPropertyDeviceIsRunningSomewhereOtherThanNovaLINKApp:
             ThrowIf(inDataSize < sizeof(CFBooleanRef), CAException(kAudioHardwareBadPropertySizeError), "NovaLINK_Device::Device_GetPropertyData: not enough space for the return value of kAudioDeviceCustomPropertyDeviceIsRunningSomewhereOtherThanNovaLINKApp for the device");
             *reinterpret_cast<CFBooleanRef*>(outData) = mClients.ClientsOtherThanNovaLINKAppRunningIO() ? kCFBooleanTrue : kCFBooleanFalse;
+            outDataSize = sizeof(CFBooleanRef);
+            break;
+
+        case kAudioDeviceCustomPropertyInputIsRunningSomewhereOtherThanPassthroughHost:
+            ThrowIf(inDataSize < sizeof(CFBooleanRef),
+                    CAException(kAudioHardwareBadPropertySizeError),
+                    "NovaLINK_Device::Device_GetPropertyData: not enough space for "
+                    "kAudioDeviceCustomPropertyInputIsRunningSomewhereOtherThanPassthroughHost");
+            *reinterpret_cast<CFBooleanRef*>(outData) =
+                    mClients.ClientsOtherThanPassthroughHostReadingInput() ? kCFBooleanTrue : kCFBooleanFalse;
             outDataSize = sizeof(CFBooleanRef);
             break;
 
@@ -1387,6 +1415,13 @@ void	NovaLINK_Device::DoIOOperation(AudioObjectID inStreamObjectID, UInt32 inCli
 	{
 		case kAudioServerPlugInIOOperationReadInput:
             {
+                // Capture clients (Zoom/OBS) trigger mic inject demand; output-only clients do not.
+                // Only queue once per IO session — ReadInput runs every cycle.
+                if(SupportsMicMix() && mClients.ClientShouldMarkInputIORT(inClientID))
+                {
+                    mTaskQueue.QueueAsync_StartClientInputIO(&mClients, inClientID);
+                }
+
                 CAMutex::Locker theIOLocker(mIOMutex);
 
                 // Copy the audio data out of our ring buffer.

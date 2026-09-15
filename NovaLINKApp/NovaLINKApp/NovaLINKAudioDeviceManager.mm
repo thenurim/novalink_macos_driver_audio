@@ -76,6 +76,7 @@
 
         try {
             novaLINKDevice = new NovaLINKDevice;
+            [[NovaLINKMicInputMixer sharedInstance] startDemandMonitoring];
         } catch (const CAException& e) {
             LogError("NovaLINKAudioDeviceManager::init: NovaLINKDevice not found. (%d)", e.GetError());
             self = nil;
@@ -344,9 +345,9 @@
     playThrough_UISounds.SetDevices(&uiSoundsDevice, &newOutputDevice);
     playThrough_UISounds.Activate();
 
-    // Keep hardware mic mixed into NovaLINK virtual input for capture clients.
-    // ensureStarted avoids stop/start on every output switch (stacked Microphone TCC).
-    [[NovaLINKMicInputMixer sharedInstance] ensureStarted];
+    // Keep hardware mic mixed into NovaLINK virtual input only while capture clients
+    // (Zoom/OBS/…) are reading that input — avoids a permanent microphone privacy indicator.
+    [[NovaLINKMicInputMixer sharedInstance] syncToCaptureDemand];
 }
 
 - (void) setDataSource:(UInt32)dataSourceID device:(NovaLINKAudioDevice&)device {

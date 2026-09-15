@@ -64,6 +64,11 @@ public:
     // kAudioServerPlugInIOOperationThread, and false again on StopIO or when
     // kAudioServerPlugInIOOperationThread ends
     bool                          mDoingIO = false;
+
+    // True after the client has performed at least one kAudioServerPlugInIOOperationReadInput
+    // in the current IO session. Cleared on StopIO. Distinguishes capture clients from
+    // output-only clients that share the same StartIO.
+    bool                          mDoingInputIO = false;
     
     // True if NovaLINKApp has set this client as belonging to the music player app
     bool                          mIsMusicPlayer = false;

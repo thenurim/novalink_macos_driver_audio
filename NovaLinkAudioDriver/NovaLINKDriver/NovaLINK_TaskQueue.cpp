@@ -192,6 +192,16 @@ bool    NovaLINK_TaskQueue::Queue_UpdateClientIOState(bool inSync, NovaLINK_Clie
     }
 }
 
+void    NovaLINK_TaskQueue::QueueAsync_StartClientInputIO(NovaLINK_Clients* inClients, UInt32 inClientID)
+{
+    DebugMsg("NovaLINK_TaskQueue::QueueAsync_StartClientInputIO: Queueing kNovaLINKTaskStartClientInputIO asynchronously");
+    NovaLINK_Task theTask(kNovaLINKTaskStartClientInputIO,
+                          /* inIsSync = */ false,
+                          reinterpret_cast<UInt64>(inClients),
+                          static_cast<UInt64>(inClientID));
+    QueueOnNonRealtimeThread(theTask);
+}
+
 UInt64    NovaLINK_TaskQueue::QueueSync(NovaLINK_TaskID inTaskID, bool inRunOnRealtimeThread, UInt64 inTaskArg1, UInt64 inTaskArg2)
 {
     DebugMsg("NovaLINK_TaskQueue::QueueSync: Queueing task synchronously to be processed on the %s thread. inTaskID=%d inTaskArg1=%llu inTaskArg2=%llu",
@@ -463,6 +473,20 @@ bool    NovaLINK_TaskQueue::ProcessNonRealTimeThreadTask(NovaLINK_Task* inTask)
             catch(NovaLINK_InvalidClientException)
             {
                 DebugMsg("NovaLINK_TaskQueue::ProcessNonRealTimeThreadTask: Ignoring NovaLINK_InvalidClientException thrown by StopIONonRT. %s",
+                         "It's possible the client was removed before this task was processed.");
+            }
+            break;
+
+        case kNovaLINKTaskStartClientInputIO:
+            DebugMsg("NovaLINK_TaskQueue::ProcessNonRealTimeThreadTask: Processing kNovaLINKTaskStartClientInputIO");
+            try
+            {
+                NovaLINK_Clients* theClients = reinterpret_cast<NovaLINK_Clients*>(inTask->GetArg1());
+                NovaLINK_ClientTasks::StartInputIONonRT(theClients, static_cast<UInt32>(inTask->GetArg2()));
+            }
+            catch(NovaLINK_InvalidClientException)
+            {
+                DebugMsg("NovaLINK_TaskQueue::ProcessNonRealTimeThreadTask: Ignoring NovaLINK_InvalidClientException thrown by StartInputIONonRT. %s",
                          "It's possible the client was removed before this task was processed.");
             }
             break;

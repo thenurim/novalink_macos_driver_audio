@@ -46,6 +46,7 @@ void    NovaLINK_Client::Copy(const NovaLINK_Client& inClient)
     mBundleID = inClient.mBundleID;
     mIsNativeEndian = inClient.mIsNativeEndian;
     mDoingIO = inClient.mDoingIO;
+    mDoingInputIO = inClient.mDoingInputIO;
     mIsMusicPlayer = inClient.mIsMusicPlayer;
 }
 
