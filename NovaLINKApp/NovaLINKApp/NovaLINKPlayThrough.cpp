@@ -983,27 +983,6 @@ void    NovaLINKPlayThrough::Start()
         return;
     }
 
-    // Opening NovaLINK as an input device lights the macOS microphone privacy indicator.
-    // Only do that while a non-App client actually needs playthrough (Chrome/Zoom/…).
-    // Speculative starts (agent launch kick, stale XPC) used to leave the orange mic icon on
-    // permanently / for the idle-stop grace window with nobody playing.
-    bool clientsNeedPlaythrough = false;
-    NovaLINKLogAndSwallowExceptions("NovaLINKPlayThrough::Start", [&] {
-        clientsNeedPlaythrough = IsRunningSomewhereOtherThanNovaLINKApp(mInputDevice);
-    });
-    if(!clientsNeedPlaythrough)
-    {
-        DebugMsg("NovaLINKPlayThrough::Start: No non-App clients on NovaLINKDevice — "
-                 "skipping StartIOProc (avoids microphone privacy indicator)");
-        CAMutex::Locker stateLocker(mStateMutex);
-        mPlayingThrough = false;
-        mInputDeviceIOProcState = IOState::Stopped;
-        mOutputDeviceIOProcState = IOState::Stopped;
-        mIdleStopArmed = true;
-        ReleaseThreadsWaitingForOutputToStart();
-        return;
-    }
-
     // Start the real output device first, then NovaLINK input.
     //
     // Starting NovaLINK (input) first nests another StartIO on the virtual device while a client
