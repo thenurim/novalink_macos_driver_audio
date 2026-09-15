@@ -224,12 +224,17 @@
 
         AudioDeviceID currentDeviceID = outputDevice.GetObjectID();  // (Doesn't throw.)
 
-        // coreaudiod briefly invalidates AudioObjectIDs while it restarts IO for a HAL plugin
-        // config change. On a real cold boot this can chain across several restart cycles (TCC
-        // prompts, Bluetooth reconnects, driver (re)registration, ...), so the window can run
-        // several seconds rather than the sub-second hiccup seen in a warm repro. It shows up
-        // here as kAudioHardwareBadObjectError on an otherwise-valid device. Retry with a
-        // deadline before giving up instead of surfacing "Failed to set X as the output device".
+        // AudioObjectIDs are just per-boot-session HAL handles. While a device is still
+        // settling right after boot (Bluetooth reconnecting, coreaudiod restarting IO for a
+        // plugin config change, ...), coreaudiod can renumber them — so retrying with the same
+        // numeric ID chases a target that's already moved on and can never succeed even after
+        // a long wait. Capture the target's UID (stable across renumbering/reboots) up front so
+        // each retry can re-resolve the *current* AudioObjectID for the same physical device.
+        CFStringRef __nullable targetDeviceUID = nullptr;
+        NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+            targetDeviceUID = NovaLINKAudioDevice(newDeviceID).CopyDeviceUID();
+        });
+
         NSDate* retryDeadline = [NSDate dateWithTimeIntervalSinceNow:8.0];
         BOOL succeeded = NO;
         NSError* __nullable lastError = nil;
@@ -246,10 +251,26 @@
 
                 if (e.GetError() == kAudioHardwareBadObjectError &&
                     retryDeadline.timeIntervalSinceNow > 0) {
+                    AudioObjectID reresolvedID = kAudioObjectUnknown;
+                    if (targetDeviceUID) {
+                        CAHALAudioSystemObject audioSystem;
+                        NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+                            reresolvedID = audioSystem.GetAudioDeviceForUID(targetDeviceUID);
+                        });
+                    }
+
                     LogWarning("NovaLINKAudioDeviceManager::setOutputDeviceWithIDImpl: Got "
-                               "kAudioHardwareBadObjectError, probably coreaudiod mid-restart. "
-                               "Retrying for up to %.1fs more.",
+                               "kAudioHardwareBadObjectError for device %u, probably renumbered "
+                               "while settling. Re-resolved by UID to %u. Retrying for up to "
+                               "%.1fs more.",
+                               newDeviceID,
+                               reresolvedID,
                                retryDeadline.timeIntervalSinceNow);
+
+                    if (reresolvedID != kAudioObjectUnknown) {
+                        newDeviceID = reresolvedID;
+                    }
+
                     [NSThread sleepForTimeInterval:0.3];
                     continue;
                 }
@@ -264,6 +285,10 @@
                                                   revertTo:(revertOnFailure ? &currentDeviceID : nullptr)];
                 break;
             }
+        }
+
+        if (targetDeviceUID) {
+            CFRelease(targetDeviceUID);
         }
 
         if (lastError) {
