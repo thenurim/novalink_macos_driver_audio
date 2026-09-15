@@ -33,6 +33,9 @@ extern "C" {
 // On failure, returns one of the kNovaLINKXPC_* error codes, or the error code received from NovaLINKXPCHelper. Returns kNovaLINKXPC_Success otherwise.
 UInt64 StartNovaLINKAppPlayThroughSync(bool inIsForUISoundsDevice);
 
+// Starts Helper-hosted fallback playthrough when the companion app is not registered.
+UInt64 StartFallbackPlayThroughSync(bool inIsForUISoundsDevice);
+
 #if defined(__cplusplus)
 }
 #endif

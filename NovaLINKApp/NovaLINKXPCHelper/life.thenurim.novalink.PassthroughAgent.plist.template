@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>life.thenurim.novalink.PassthroughAgent</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{{PASSTHROUGH_APP_EXECUTABLE}}</string>
+		<string>--agent</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<!-- Restart on crash/signal, but not on clean exit (e.g. companion UI holds the lock). -->
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ThrottleInterval</key>
+	<integer>2</integer>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>LimitLoadToSessionType</key>
+	<string>Aqua</string>
+	<key>StandardOutPath</key>
+	<string>/tmp/novalink-passthrough-agent.log</string>
+	<key>StandardErrorPath</key>
+	<string>/tmp/novalink-passthrough-agent.log</string>
+</dict>
+</plist>

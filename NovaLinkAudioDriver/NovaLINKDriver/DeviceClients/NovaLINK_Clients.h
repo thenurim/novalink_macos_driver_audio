@@ -80,6 +80,10 @@ private:
     void                                SendIORunningNotifications(bool sendIsRunningNotification, bool sendIsRunningSomewhereOtherThanNovaLINKAppNotification) const;
 public:
     bool                                IsNovaLINKApp(UInt32 inClientID) const { return inClientID == mNovaLINKAppClientID; }
+    bool                                IsXPCHelper(UInt32 inClientID) const { return inClientID == mXPCHelperClientID; }
+    // App or XPCHelper — either can host playthrough and should not trigger nested StartIO playthrough requests.
+    bool                                IsPassthroughHost(UInt32 inClientID) const
+                                            { return IsNovaLINKApp(inClientID) || IsXPCHelper(inClientID); }
     bool                                NovaLINKAppHasClientRegistered() const { return mNovaLINKAppClientID != -1; }
     
     inline pid_t                        GetMusicPlayerProcessIDProperty() const { return mMusicPlayerProcessIDProperty; }
@@ -108,6 +112,7 @@ private:
     CAMutex                             mMutex { "Clients" };
     
     SInt64                              mNovaLINKAppClientID = -1;
+    SInt64                              mXPCHelperClientID = -1;
     
     // The value of the kAudioDeviceCustomPropertyMusicPlayerProcessID property, or 0 if it's unset/null.
     // We store this separately because the music player might not always be a client, but could be added

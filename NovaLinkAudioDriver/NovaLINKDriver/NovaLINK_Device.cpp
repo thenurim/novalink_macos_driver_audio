@@ -1115,7 +1115,7 @@ void	NovaLINK_Device::Device_SetPropertyData(AudioObjectID inObjectID, pid_t inC
 
 void	NovaLINK_Device::StartIO(UInt32 inClientID)
 {
-    bool clientIsNovaLINKApp, novaLINKAppHasClientRegistered;
+    bool clientIsPassthroughHost, novaLINKAppHasClientRegistered;
     
     {
         CAMutex::Locker theStateLocker(mStateMutex);
@@ -1142,21 +1142,25 @@ void	NovaLINK_Device::StartIO(UInt32 inClientID)
                                "NovaLINK_Device::StartIO: Failed to start because of an error calling down to the driver.");
         }
         
-        clientIsNovaLINKApp = mClients.IsNovaLINKApp(inClientID);
+        clientIsPassthroughHost = mClients.IsPassthroughHost(inClientID);
         novaLINKAppHasClientRegistered = mClients.NovaLINKAppHasClientRegistered();
     }
     
-    // Request that NovaLINKApp start playthrough. On modern macOS we must not block StartIO waiting
-    // for the real output device — that deadlocks with the HAL and freezes clients (Chrome/YouTube).
-    // NovaLINKApp starts playthrough asynchronously (see startPlayThroughSync ReturningEarly path).
-    if(!clientIsNovaLINKApp && novaLINKAppHasClientRegistered)
+    // Request that playthrough start. Prefer the companion app when it is registered; otherwise the
+    // privileged XPCHelper hosts fallback playthrough to the system's non-NovaLINK default output.
+    // On modern macOS we must not block StartIO waiting for the real output device — that deadlocks
+    // with the HAL and freezes clients (Chrome/YouTube).
+    if(!clientIsPassthroughHost)
     {
-        DebugMsg("NovaLINK_Device::StartIO: Requesting playthrough start (non-blocking).");
+        DebugMsg("NovaLINK_Device::StartIO: Requesting playthrough start (non-blocking). appRegistered=%d",
+                 novaLINKAppHasClientRegistered);
         const bool forUISoundsDevice = (GetObjectID() == kObjectID_Device_UI_Sounds);
         // Run the XPC round-trip off the StartIO stack so the HAL can finish client StartIO
         // immediately. Dropped initial frames are preferable to a hung Chrome/YouTube tab.
         CADispatchQueue::GetGlobalSerialQueue().Dispatch(false, ^{
-            UInt64 theXPCError = StartNovaLINKAppPlayThroughSync(forUISoundsDevice);
+            UInt64 theXPCError = novaLINKAppHasClientRegistered
+                    ? StartNovaLINKAppPlayThroughSync(forUISoundsDevice)
+                    : StartFallbackPlayThroughSync(forUISoundsDevice);
 
             switch(theXPCError)
             {
@@ -1165,19 +1169,19 @@ void	NovaLINK_Device::StartIO(UInt32 inClientID)
                     break;
 
                 case kNovaLINKXPC_MessageFailure:
-                    LogWarning("NovaLINK_Device::StartIO: Couldn't reach NovaLINKApp via XPC.");
+                    LogWarning("NovaLINK_Device::StartIO: Couldn't reach playthrough host via XPC.");
                     break;
 
                 case kNovaLINKXPC_Timeout:
-                    LogWarning("NovaLINK_Device::StartIO: Timed out waiting for NovaLINKApp via XPC.");
+                    LogWarning("NovaLINK_Device::StartIO: Timed out waiting for playthrough host via XPC.");
                     break;
 
                 case kNovaLINKXPC_ReturningEarlyError:
-                    DebugMsg("NovaLINK_Device::StartIO: NovaLINKApp returned early (async start).");
+                    DebugMsg("NovaLINK_Device::StartIO: Playthrough host returned early (async start).");
                     break;
 
                 default:
-                    LogError("NovaLINK_Device::StartIO: NovaLINKApp failed to start the output device. theXPCError=%llu",
+                    LogError("NovaLINK_Device::StartIO: Playthrough host failed to start the output device. theXPCError=%llu",
                              theXPCError);
                     break;
             }

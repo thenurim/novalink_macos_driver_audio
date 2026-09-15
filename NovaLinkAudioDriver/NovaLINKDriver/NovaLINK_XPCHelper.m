@@ -135,5 +135,54 @@ UInt64 StartNovaLINKAppPlayThroughSync(bool inIsForUISoundsDevice)
     return theAnswer;
 }
 
+UInt64 StartFallbackPlayThroughSync(bool inIsForUISoundsDevice)
+{
+    __block UInt64 theAnswer = kNovaLINKXPC_Success;
+
+    NSXPCConnection* theConnection = CreateXPCHelperConnection();
+    dispatch_semaphore_t theReplySemaphore = dispatch_semaphore_create(0);
+
+    void (^failureHandler)(void) = ^{
+        DebugMsg("NovaLINK_XPCHelper::StartFallbackPlayThroughSync: Connection to NovaLINKXPCHelper failed");
+        theAnswer = kNovaLINKXPC_MessageFailure;
+        dispatch_semaphore_signal(theReplySemaphore);
+    };
+    theConnection.interruptionHandler = failureHandler;
+    theConnection.invalidationHandler = failureHandler;
+
+    [[theConnection remoteObjectProxyWithErrorHandler:^(NSError* error) {
+        (void)error;
+        DebugMsg("NovaLINK_XPCHelper::StartFallbackPlayThroughSync: Remote call error: %s",
+                 [[error debugDescription] UTF8String]);
+        failureHandler();
+    }] startFallbackPlayThroughSyncWithReply:^(NSError* reply) {
+        DebugMsg("NovaLINK_XPCHelper::StartFallbackPlayThroughSync: Got reply: \"%s\"",
+                 [[reply localizedDescription] UTF8String]);
+
+        theAnswer = kNovaLINKXPC_MessageFailure;
+        @try {
+            if (reply)
+            {
+                theAnswer = (UInt64)[reply code];
+            }
+        } @catch(...) {
+            NSLog(@"NovaLINK_XPCHelper::StartFallbackPlayThroughSync: Exception while reading reply code");
+        }
+
+        theConnection.interruptionHandler = nil;
+        theConnection.invalidationHandler = nil;
+        dispatch_semaphore_signal(theReplySemaphore);
+    } forUISoundsDevice:inIsForUISoundsDevice];
+
+    if (0 != dispatch_semaphore_wait(theReplySemaphore,
+                                     dispatch_time(DISPATCH_TIME_NOW, REMOTE_CALL_DEFAULT_TIMEOUT_SECS * NSEC_PER_SEC))) {
+        NSLog(@"NovaLINK_XPCHelper::StartFallbackPlayThroughSync: Timed out waiting for fallback playthrough");
+        theAnswer = kNovaLINKXPC_Timeout;
+    }
+
+    [theConnection invalidate];
+    return theAnswer;
+}
+
 #pragma clang assume_nonnull end
 

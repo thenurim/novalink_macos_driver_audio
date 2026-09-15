@@ -65,10 +65,15 @@ void    NovaLINK_Clients::AddClient(NovaLINK_Client inClient)
     
     mClientMap.AddClient(inClient);
     
-    // If we're adding NovaLINKApp, update our local copy of its client ID
+    // If we're adding NovaLINKApp or XPCHelper, update our local copy of their client ID.
+    // XPCHelper hosts fallback playthrough when the companion app is not running.
     if(inClient.mBundleID.IsValid() && inClient.mBundleID == kNovaLINKAppBundleID)
     {
         mNovaLINKAppClientID = inClient.mClientID;
+    }
+    else if(inClient.mBundleID.IsValid() && inClient.mBundleID == kNovaLINKXPCHelperBundleID)
+    {
+        mXPCHelperClientID = inClient.mClientID;
     }
 }
 
@@ -82,6 +87,10 @@ void    NovaLINK_Clients::RemoveClient(const UInt32 inClientID)
     if(theRemovedClient.mClientID == mNovaLINKAppClientID)
     {
         mNovaLINKAppClientID = -1;
+    }
+    if(theRemovedClient.mClientID == mXPCHelperClientID)
+    {
+        mXPCHelperClientID = -1;
     }
 }
 
@@ -115,8 +124,8 @@ bool    NovaLINK_Clients::StartIONonRT(UInt32 inClientID)
         
         mStartCount++;
         
-        // Update mStartCountExcludingNovaLINKApp
-        if(!IsNovaLINKApp(inClientID))
+        // Update mStartCountExcludingNovaLINKApp (also excludes XPCHelper fallback playthrough)
+        if(!IsPassthroughHost(inClientID))
         {
             ThrowIf(mStartCountExcludingNovaLINKApp == UINT64_MAX, CAException(kAudioHardwareIllegalOperationError), "NovaLINK_Clients::StartIO: failed to start because mStartCountExcludingNovaLINKApp was maxxed out already");
             
@@ -133,7 +142,9 @@ bool    NovaLINK_Clients::StartIONonRT(UInt32 inClientID)
         sendIsRunningNotification = didStartIO;
     }
     
-    Assert(mStartCountExcludingNovaLINKApp == mStartCount - 1 || mStartCountExcludingNovaLINKApp == mStartCount,
+    // At most App + XPCHelper are excluded as passthrough hosts.
+    Assert(mStartCountExcludingNovaLINKApp <= mStartCount &&
+           (mStartCount - mStartCountExcludingNovaLINKApp) <= 2,
            "mStartCount and mStartCountExcludingNovaLINKApp are out of sync");
     
     SendIORunningNotifications(sendIsRunningNotification, sendIsRunningSomewhereOtherThanNovaLINKAppNotification);
@@ -168,8 +179,8 @@ bool    NovaLINK_Clients::StopIONonRT(UInt32 inClientID)
         
         mStartCount--;
         
-        // Update mStartCountExcludingNovaLINKApp
-        if(!IsNovaLINKApp(inClientID))
+        // Update mStartCountExcludingNovaLINKApp (also excludes XPCHelper fallback playthrough)
+        if(!IsPassthroughHost(inClientID))
         {
             ThrowIf(mStartCountExcludingNovaLINKApp <= 0, CAException(kAudioHardwareIllegalOperationError), "NovaLINK_Clients::StopIO: Underflowed mStartCountExcludingNovaLINKApp");
             
@@ -186,7 +197,8 @@ bool    NovaLINK_Clients::StopIONonRT(UInt32 inClientID)
         sendIsRunningNotification = didStopIO;
     }
     
-    Assert(mStartCountExcludingNovaLINKApp == mStartCount - 1 || mStartCountExcludingNovaLINKApp == mStartCount,
+    Assert(mStartCountExcludingNovaLINKApp <= mStartCount &&
+           (mStartCount - mStartCountExcludingNovaLINKApp) <= 2,
            "mStartCount and mStartCountExcludingNovaLINKApp are out of sync");
     
     SendIORunningNotifications(sendIsRunningNotification, sendIsRunningSomewhereOtherThanNovaLINKAppNotification);

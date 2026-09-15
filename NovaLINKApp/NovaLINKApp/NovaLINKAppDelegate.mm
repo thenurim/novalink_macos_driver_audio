@@ -42,11 +42,21 @@
 // System Includes
 #import <AVFoundation/AVCaptureDevice.h>
 
+#include <unistd.h>
+
 
 #pragma clang assume_nonnull begin
 
 static NSString* const kOptNoPersistentData  = @"--no-persistent-data";
 static NSString* const kOptShowDockIcon      = @"--show-dock-icon";
+// Background LaunchAgent mode: playthrough + XPC only. Does not steal the OS default device.
+static NSString* const kOptAgent             = @"--agent";
+// Must match main.m — GUI launch posts these when the agent already holds the single-instance lock.
+static NSString* const kNovaLINKShowCompanionUINotification =
+    @"life.thenurim.novalink.ShowCompanionUI";
+static NSString* const kNovaLINKQuitAgentForCompanionUINotification =
+    @"life.thenurim.novalink.QuitAgentForCompanionUI";
+static NSString* const kPassthroughAgentLabel = @"life.thenurim.novalink.PassthroughAgent";
 
 @implementation NovaLINKAppDelegate {
     // The button in the system status bar that shows the main menu.
@@ -66,17 +76,33 @@ static NSString* const kOptShowDockIcon      = @"--show-dock-icon";
     NovaLINKDebugLoggingMenuItem* debugLoggingMenuItem;
     NovaLINKXPCListener* xpcListener;
     NovaLINKPreferredOutputDevices* preferredOutputDevices;
+
+    BOOL agentMode;
+    BOOL didSetNovaLINKAsOSDefault;
+    BOOL continueLaunchCompleted;
+    BOOL uiPromotedFromAgent;
+    // Agent was asked to exit so a Finder/GUI launch can take over (do not kickstart agent).
+    BOOL quittingForCompanionUIHandoff;
 }
 
 @synthesize audioDevices = audioDevices;
 
 - (void) awakeFromNib {
     [super awakeFromNib];
+
+    agentMode = [NSProcessInfo.processInfo.arguments indexOfObject:kOptAgent] != NSNotFound;
+    didSetNovaLINKAsOSDefault = NO;
+    continueLaunchCompleted = NO;
+    uiPromotedFromAgent = NO;
+    quittingForCompanionUIHandoff = NO;
     
     // Show NovaLINKApp in the dock, if the command-line option for that was passed. This is used by the
     // UI tests.
     if ([NSProcessInfo.processInfo.arguments indexOfObject:kOptShowDockIcon] != NSNotFound) {
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+    } else if (!agentMode) {
+        // Explicit accessory policy helps the status item register with Control Center reliably.
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
     }
     
     haveShownXPCHelperErrorMessage = NO;
@@ -90,10 +116,31 @@ static NSString* const kOptShowDockIcon      = @"--show-dock-icon";
     // Stored user settings
     userDefaults = [self createUserDefaults];
 
-    // Add the status bar item. (The thing you click to show NovaLINKApp's main menu.)
-    statusBarItem = [[NovaLINKStatusBarItem alloc] initWithMenu:self.novaLINKMenu
-                                              audioDevices:audioDevices
-                                              userDefaults:userDefaults];
+    // Agent mode stays menu-bar / dock free and only hosts playthrough until the user opens the app.
+    if (!agentMode) {
+        // Add the status bar item. (The thing you click to show NovaLINKApp's main menu.)
+        statusBarItem = [[NovaLINKStatusBarItem alloc] initWithMenu:self.novaLINKMenu
+                                                  audioDevices:audioDevices
+                                                  userDefaults:userDefaults];
+    } else {
+        NSLog(@"NovaLINKAppDelegate: starting in --agent (background passthrough) mode");
+    }
+
+    NSDistributedNotificationCenter* center = [NSDistributedNotificationCenter defaultCenter];
+
+    // Preferred path: GUI launch asks the agent to exit so a fresh UI process can take the lock.
+    [center addObserver:self
+               selector:@selector(handleQuitAgentForCompanionUINotification:)
+                   name:kNovaLINKQuitAgentForCompanionUINotification
+                 object:nil
+     suspensionBehavior:NSNotificationSuspensionBehaviorDeliverImmediately];
+
+    // Fallback: promote the already-running agent in-process if handoff timed out.
+    [center addObserver:self
+               selector:@selector(handleShowCompanionUINotification:)
+                   name:kNovaLINKShowCompanionUINotification
+                 object:nil
+     suspensionBehavior:NSNotificationSuspensionBehaviorDeliverImmediately];
 }
 
 - (void) applicationDidFinishLaunching:(NSNotification*)aNotification {
@@ -136,6 +183,13 @@ static NSString* const kOptShowDockIcon      = @"--show-dock-icon";
                             [self continueLaunchAfterInputDevicePermissionGranted];
                         } else {
                             NSLog(@"NovaLINKAppDelegate::applicationDidFinishLaunching: Permission denied");
+                            if (self->agentMode) {
+                                NSLog(@"NovaLINKAppDelegate: agent mode cannot prompt further. "
+                                      "Grant Microphone access to \"NovaLINK Audio Passthrough\" "
+                                      "in System Settings, then relaunch the agent.");
+                                [NSApp terminate:nil];
+                                return;
+                            }
                             [self showErrorMessage:@"NovaLINK Audio Passthrough needs microphone permission."
                                    informativeText:@"It uses a virtual microphone to access your system's "
                                                     "audio.\n\nGrant access in System Settings > Privacy & "
@@ -148,6 +202,11 @@ static NSString* const kOptShowDockIcon      = @"--show-dock-icon";
                 NSLog(@"NovaLINKAppDelegate::applicationDidFinishLaunching: Microphone permission not granted "
                       "(status=%ld)",
                       (long)micStatus);
+                if (agentMode) {
+                    NSLog(@"NovaLINKAppDelegate: agent mode requires Microphone permission. Exiting.");
+                    [NSApp terminate:nil];
+                    return;
+                }
                 [self showErrorMessage:@"NovaLINK Audio Passthrough needs microphone permission."
                        informativeText:@"It uses a virtual microphone to access your system's "
                                         "audio.\n\nGrant access in System Settings > Privacy & "
@@ -171,8 +230,12 @@ static NSString* const kOptShowDockIcon      = @"--show-dock-icon";
         return;
     }
 
-    // Make NovaLINKDevice the default device.
-    [self setNovaLINKDeviceAsDefault];
+    // Make NovaLINKDevice the default device — but not in agent mode. The agent only hosts
+    // playthrough for when the user (or another client) has already selected NovaLINK.
+    if (!agentMode) {
+        [self setNovaLINKDeviceAsDefault];
+        didSetNovaLINKAsOSDefault = YES;
+    }
 
     // Handle some of the unusual reasons NovaLINKApp might have to exit, mostly crashes.
     NovaLINKTermination::SetUpTerminationCleanUp(audioDevices);
@@ -184,15 +247,99 @@ static NSString* const kOptShowDockIcon      = @"--show-dock-icon";
     autoPauseMusic = [[NovaLINKAutoPauseMusic alloc] initWithAudioDevices:audioDevices
                                                         musicPlayers:musicPlayers];
 
-    [self setUpMainMenu];
+    if (!agentMode) {
+        [self setUpMainMenu];
+    }
 
     xpcListener = [[NovaLINKXPCListener alloc] initWithAudioDevices:audioDevices
                                   helperConnectionErrorHandler:^(NSError* error) {
         NSLog(@"NovaLINKAppDelegate::continueLaunchAfterInputDevicePermissionGranted: "
               "(helperConnectionErrorHandler) NovaLINKXPCHelper connection error: %@",
               error);
-        [self showXPCHelperErrorMessage:error];
+        if (!self->agentMode) {
+            [self showXPCHelperErrorMessage:error];
+        }
     }];
+
+    if (agentMode) {
+        NSLog(@"NovaLINKAppDelegate: agent playthrough host ready (not changing OS default device)");
+        // If clients are already writing to NovaLINK (user selected it before the agent
+        // finished launching), kick playthrough without waiting for another StartIO/XPC edge.
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            OSStatus errMain = [self->audioDevices startPlayThroughSync:NO];
+            OSStatus errUI = [self->audioDevices startPlayThroughSync:YES];
+            NSLog(@"NovaLINKAppDelegate: agent initial playthrough kick "
+                  "(main=%d ui=%d)", (int)errMain, (int)errUI);
+        });
+    }
+
+    continueLaunchCompleted = YES;
+}
+
+- (void) handleQuitAgentForCompanionUINotification:(NSNotification*)notification {
+    #pragma unused (notification)
+    if (!agentMode) {
+        return;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self->quittingForCompanionUIHandoff) {
+            return;
+        }
+        self->quittingForCompanionUIHandoff = YES;
+        NSLog(@"NovaLINKAppDelegate: agent exiting so companion UI process can take over");
+        [NSApp terminate:nil];
+    });
+}
+
+- (void) handleShowCompanionUINotification:(NSNotification*)notification {
+    #pragma unused (notification)
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self promoteAgentToCompanionUI];
+    });
+}
+
+// Fallback only: turns a background --agent process into the status-bar companion.
+// Preferred path is QuitAgentForCompanionUI + fresh GUI process (see main.m).
+- (void) promoteAgentToCompanionUI {
+    if (quittingForCompanionUIHandoff) {
+        return;
+    }
+
+    if (!agentMode && statusBarItem) {
+        NSLog(@"NovaLINKAppDelegate: companion UI already visible");
+        return;
+    }
+
+    if (!continueLaunchCompleted) {
+        // Finish launch first, then promote.
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            [self promoteAgentToCompanionUI];
+        });
+        return;
+    }
+
+    NSLog(@"NovaLINKAppDelegate: promoting agent → companion UI (fallback)");
+    agentMode = NO;
+    uiPromotedFromAgent = YES;
+
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+
+    if (!statusBarItem) {
+        statusBarItem = [[NovaLINKStatusBarItem alloc] initWithMenu:self.novaLINKMenu
+                                                  audioDevices:audioDevices
+                                                  userDefaults:userDefaults];
+    }
+
+    if (!outputDeviceMenuSection) {
+        [self setUpMainMenu];
+    }
+
+    if (!didSetNovaLINKAsOSDefault) {
+        [self setNovaLINKDeviceAsDefault];
+        didSetNovaLINKAsOSDefault = YES;
+    }
 }
 
 // Returns NO if (and only if) NovaLINKApp is about to terminate because of a fatal error.
@@ -283,13 +430,59 @@ static NSString* const kOptShowDockIcon      = @"--show-dock-icon";
     
     DebugMsg("NovaLINKAppDelegate::applicationWillTerminate");
 
-    // Change the user's default output device back.
-    NSError* error = [audioDevices unsetNovaLINKDeviceAsOSDefault];
-    
-    if (error) {
-        [self showSetDeviceAsDefaultError:error
-                                  message:@"Failed to reset your system's audio output device."
-                          informativeText:@"You'll have to change it yourself to get audio working again."];
+    NSDistributedNotificationCenter* center = [NSDistributedNotificationCenter defaultCenter];
+    [center removeObserver:self
+                      name:kNovaLINKShowCompanionUINotification
+                    object:nil];
+    [center removeObserver:self
+                      name:kNovaLINKQuitAgentForCompanionUINotification
+                    object:nil];
+
+    // Only restore the OS default if this process changed it.
+    if (didSetNovaLINKAsOSDefault) {
+        NSError* error = [audioDevices unsetNovaLINKDeviceAsOSDefault];
+        
+        if (error) {
+            [self showSetDeviceAsDefaultError:error
+                                      message:@"Failed to reset your system's audio output device."
+                              informativeText:@"You'll have to change it yourself to get audio working again."];
+        }
+    }
+
+    // Agent is quitting so a GUI process can take over — do not relaunch the agent here.
+    if (quittingForCompanionUIHandoff) {
+        NSLog(@"NovaLINKAppDelegate: skipping agent relaunch (companion UI handoff)");
+        return;
+    }
+
+    // If the user quit the companion UI (including an agent promoted to UI), bring the
+    // background LaunchAgent back so NovaLINK keeps passthrough without the UI.
+    if (uiPromotedFromAgent || [NSProcessInfo.processInfo.arguments indexOfObject:kOptAgent] == NSNotFound) {
+        [self schedulePassthroughAgentRelaunch];
+    }
+}
+
+- (void) schedulePassthroughAgentRelaunch {
+    uid_t uid = getuid();
+    NSString* domainLabel = [NSString stringWithFormat:@"gui/%u/%@", uid, kPassthroughAgentLabel];
+    NSString* plistPath = [NSHomeDirectory() stringByAppendingPathComponent:
+        @"Library/LaunchAgents/life.thenurim.novalink.PassthroughAgent.plist"];
+    // Delay so this process releases the instance lock before the agent starts.
+    // After a SuccessfulExit=false clean handoff the job is loaded but idle — kickstart is
+    // enough; fall back to bootstrap if the job was unloaded.
+    NSTask* task = [[NSTask alloc] init];
+    task.executableURL = [NSURL fileURLWithPath:@"/bin/bash"];
+    task.arguments = @[
+        @"-c",
+        [NSString stringWithFormat:
+         @"sleep 1; "
+         @"/bin/launchctl kickstart -k '%@' >/dev/null 2>&1 || "
+         @"/bin/launchctl bootstrap 'gui/%u' '%@' >/dev/null 2>&1 || true",
+         domainLabel, uid, plistPath]
+    ];
+    NSError* __nullable err = nil;
+    if (![task launchAndReturnError:&err]) {
+        NSLog(@"NovaLINKAppDelegate: failed to schedule agent relaunch: %@", err);
     }
 }
 

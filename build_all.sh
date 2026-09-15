@@ -2,8 +2,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-CONFIG="${1:-Debug}"
+CONFIG="${1:-Release}"
 OUT_DIR="${ROOT}/build/dist"
+
+if [[ "${CONFIG}" != "Debug" && "${CONFIG}" != "Release" && "${CONFIG}" != "DebugOpt" ]]; then
+  echo "Usage: $0 [Debug|Release|DebugOpt]" >&2
+  exit 1
+fi
 
 echo "==> Building NovaLINK Audio Device (${CONFIG})"
 xcodebuild -project "${ROOT}/NovaLinkAudioDriver/NovaLINKDriver.xcodeproj" \

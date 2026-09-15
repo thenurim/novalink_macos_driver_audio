@@ -208,6 +208,9 @@
 		27C457E61CF2BC2600A6C9A6 /* NovaLINKAutoPauseMenuItem.m in Sources */ = {isa = PBXBuildFile; fileRef = 27C457E51CF2BC2600A6C9A6 /* NovaLINKAutoPauseMenuItem.m */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKApp-NovaLINKAutoPauseMenuItem.m"; }; };
 		27D1D6BB1DD7226C0049E707 /* NovaLINKAboutPanel.m in Sources */ = {isa = PBXBuildFile; fileRef = 27D1D6BA1DD7226C0049E707 /* NovaLINKAboutPanel.m */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKApp-NovaLINKAboutPanel.m"; }; };
 		27D643C01C9FB99200737F6E /* NovaLINKXPCHelperService.mm in Sources */ = {isa = PBXBuildFile; fileRef = 27D643BA1C9FB84C00737F6E /* NovaLINKXPCHelperService.mm */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKXPCHelper-NovaLINKXPCHelperService.mm"; }; };
+		ACD2E821CBBC44809A155004 /* NovaLINKPlayThrough.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 1C1962E51BC94E91008A4DF7 /* NovaLINKPlayThrough.cpp */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKXPCHelper-NovaLINKPlayThrough.cpp"; }; };
+		991C5BB95DB849A08D1FBAB5 /* NovaLINKPlayThroughRTLogger.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 19FE7DE5E3BA0046ED2BC3C6 /* NovaLINKPlayThroughRTLogger.cpp */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKXPCHelper-NovaLINKPlayThroughRTLogger.cpp"; }; };
+		E0272D57301D47CA8E82F8AB /* NovaLINKFallbackPlayThrough.mm in Sources */ = {isa = PBXBuildFile; fileRef = 1A534B64367C450ABD462096 /* NovaLINKFallbackPlayThrough.mm */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKXPCHelper-NovaLINKFallbackPlayThrough.mm"; }; };
 		27D643C11C9FB99200737F6E /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 27D643BC1C9FB84C00737F6E /* main.m */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKXPCHelper-main.m"; }; };
 		27F7D4901D2483B100821C4B /* NovaLINKDecibel.m in Sources */ = {isa = PBXBuildFile; fileRef = 27F7D48F1D2483B100821C4B /* NovaLINKDecibel.m */; settings = {COMPILER_FLAGS = "-frandom-seed=NovaLINKApp-NovaLINKDecibel.m"; }; };
 		27FB8C071DD75D0A0084DB9D /* NovaLINKHermes.m in Sources */ = {isa = PBXBuildFile; fileRef = 279F48761DD6D73900768A85 /* NovaLINKHermes.m */; };
@@ -407,6 +410,8 @@
 		27D643B51C9FABBD00737F6E /* NovaLINKXPCProtocols.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = NovaLINKXPCProtocols.h; path = ../SharedSource/NovaLINKXPCProtocols.h; sourceTree = "<group>"; };
 		27D643B91C9FB84C00737F6E /* NovaLINKXPCHelperService.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = NovaLINKXPCHelperService.h; path = NovaLINKXPCHelper/NovaLINKXPCHelperService.h; sourceTree = SOURCE_ROOT; };
 		27D643BA1C9FB84C00737F6E /* NovaLINKXPCHelperService.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = NovaLINKXPCHelperService.mm; path = NovaLINKXPCHelper/NovaLINKXPCHelperService.mm; sourceTree = SOURCE_ROOT; };
+		0145E93C20514E4BA9678A8F /* NovaLINKFallbackPlayThrough.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = NovaLINKFallbackPlayThrough.h; path = NovaLINKXPCHelper/NovaLINKFallbackPlayThrough.h; sourceTree = SOURCE_ROOT; };
+		1A534B64367C450ABD462096 /* NovaLINKFallbackPlayThrough.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = NovaLINKFallbackPlayThrough.mm; path = NovaLINKXPCHelper/NovaLINKFallbackPlayThrough.mm; sourceTree = SOURCE_ROOT; };
 		27D643BB1C9FB84C00737F6E /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = NovaLINKXPCHelper/Info.plist; sourceTree = SOURCE_ROOT; };
 		27D643BC1C9FB84C00737F6E /* main.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = main.m; path = NovaLINKXPCHelper/main.m; sourceTree = SOURCE_ROOT; };
 		27D643C41C9FBE5600737F6E /* NovaLINK_TestUtils.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = NovaLINK_TestUtils.h; path = ../SharedSource/NovaLINK_TestUtils.h; sourceTree = "<group>"; };
@@ -794,6 +799,8 @@
 			children = (
 				27D643B91C9FB84C00737F6E /* NovaLINKXPCHelperService.h */,
 				27D643BA1C9FB84C00737F6E /* NovaLINKXPCHelperService.mm */,
+				0145E93C20514E4BA9678A8F /* NovaLINKFallbackPlayThrough.h */,
+				1A534B64367C450ABD462096 /* NovaLINKFallbackPlayThrough.mm */,
 				277170141CA24D7C00AB34B4 /* NovaLINKXPCListenerDelegate.h */,
 				277170151CA24D7C00AB34B4 /* NovaLINKXPCListenerDelegate.m */,
 				27D643BC1C9FB84C00737F6E /* main.m */,
@@ -1226,6 +1233,9 @@
 				1CF2D5911F944789008B6E35 /* CAHALAudioObject.cpp in Sources */,
 				1CF2D5921F944789008B6E35 /* CAHALAudioSystemObject.cpp in Sources */,
 				27D643C01C9FB99200737F6E /* NovaLINKXPCHelperService.mm in Sources */,
+				E0272D57301D47CA8E82F8AB /* NovaLINKFallbackPlayThrough.mm in Sources */,
+				ACD2E821CBBC44809A155004 /* NovaLINKPlayThrough.cpp in Sources */,
+				991C5BB95DB849A08D1FBAB5 /* NovaLINKPlayThroughRTLogger.cpp in Sources */,
 				27D643C11C9FB99200737F6E /* main.m in Sources */,
 				277170161CA24D7C00AB34B4 /* NovaLINKXPCListenerDelegate.m in Sources */,
 				19FE7590D7565E7677D84C55 /* NovaLINKDebugLogging.c in Sources */,

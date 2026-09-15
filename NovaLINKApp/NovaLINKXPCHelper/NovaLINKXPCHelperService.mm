@@ -25,6 +25,7 @@
 
 // Local Includes
 #import "NovaLINK_Utils.h"
+#import "NovaLINKFallbackPlayThrough.h"
 #import "NovaLINKXPCListenerDelegate.h"
 #import "NovaLINKDevice.h"
 
@@ -120,34 +121,48 @@ static NSXPCConnection* __nullable sNovaLINKAppConnection = nil;
 // Called after the connection from NovaLINKApp is invalidated. (If it's only been interrupted, launchd
 // might restore it, so we wait for it to be invalidated.)
 - (void) cleanUpForNovaLINKApp {
-    // Wait a bit to see if NovaLINKApp reconnects. Then, if it doesn't, check to see if NovaLINKDevice has
-    // been left as the default output device. That would probably mean NovaLINKApp crashed or was force
-    // quit or something like that, so we try to restore the user's output device from NovaLINKXPCHelper.
+    // Wait a bit to see if NovaLINKApp reconnects. Then start Helper-hosted fallback playthrough so
+    // NovaLINK remains usable without the companion app. Only unset NovaLINK as the OS default if
+    // fallback cannot be started.
     int64_t delay = DELAY_BEFORE_CLEANING_UP_FOR_NovaLINKAPP_SECS * NSEC_PER_SEC;
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delay),
                    dispatch_get_main_queue(),
                    ^{
-                       [self unsetNovaLINKDeviceAsDefault];
+                       [self startFallbackOrUnsetNovaLINKDeviceAsDefault];
                    });
 }
 
-- (void) unsetNovaLINKDeviceAsDefault {
+- (void) startFallbackOrUnsetNovaLINKDeviceAsDefault {
     // Check that NovaLINKApp hasn't reconnected.
     if (sNovaLINKAppConnection) {
-        DebugMsg("NovaLINKXPCHelperService::unsetNovaLINKDeviceAsDefault: NovaLINKApp connected. Doing nothing.");
+        DebugMsg("NovaLINKXPCHelperService::startFallbackOrUnsetNovaLINKDeviceAsDefault: "
+                 "NovaLINKApp connected. Doing nothing.");
         return;
     }
+
+    NSError* startError = [[NovaLINKFallbackPlayThrough sharedInstance] startForUISoundsDevice:NO];
+    const NSInteger code = startError ? [startError code] : kNovaLINKXPC_InternalError;
+    if (code == kNovaLINKXPC_Success || code == kNovaLINKXPC_ReturningEarlyError) {
+        DebugMsg("NovaLINKXPCHelperService::startFallbackOrUnsetNovaLINKDeviceAsDefault: "
+                 "Fallback playthrough started (code=%ld).", (long)code);
+        // Also start UI-sounds instance so system sounds keep working.
+        [[NovaLINKFallbackPlayThrough sharedInstance] startForUISoundsDevice:YES];
+        return;
+    }
+
+    LogWarning("NovaLINKXPCHelperService::startFallbackOrUnsetNovaLINKDeviceAsDefault: "
+               "Fallback failed (%s). Falling back to unsetting NovaLINK as default.",
+               [[startError localizedDescription] UTF8String]);
 
     AudioObjectID outputDevice = outputDeviceToMakeDefaultOnAbnormalTermination;
 
     if (outputDevice == kAudioObjectUnknown) {
-        // We could set the default device arbitrarily, but it's probably not worth the effort.
-        DebugMsg("NovaLINKXPCHelperService::unsetNovaLINKDeviceAsDefault: No device to set. Doing nothing.");
+        DebugMsg("NovaLINKXPCHelperService::startFallbackOrUnsetNovaLINKDeviceAsDefault: "
+                 "No device to set. Doing nothing.");
         return;
     }
 
-    // If NovaLINKDevice has been left as the default device, change it to the real output device.
     NovaLINKLogAndSwallowExceptions("NovaLINKXPCHelperService::unsetNovaLINKDeviceAsDefault", ([&] {
         NSLog(@"NovaLINKXPCHelperService::unsetNovaLINKDeviceAsDefault: Changing default device to %u",
               outputDevice);
@@ -162,6 +177,9 @@ static NSXPCConnection* __nullable sNovaLINKAppConnection = nil;
     [self debugWarnIfCalledByNovaLINKDriver];
     
     DebugMsg("NovaLINKXPCHelperService::registerAsNovaLINKAppWithListenerEndpoint: Received NovaLINKApp listener endpoint");
+
+    // Hand playthrough ownership back to the companion app.
+    [[NovaLINKFallbackPlayThrough sharedInstance] stop];
     
     // Store the connection (which we now know is from NovaLINKApp) and endpoint so all instances of this class can use them.
     @synchronized([self class]) {
@@ -241,6 +259,28 @@ static NSXPCConnection* __nullable sNovaLINKAppConnection = nil;
     DebugMsg("NovaLINKXPCHelperService::startNovaLINKAppPlayThroughSyncWithReply: Reply to NovaLINKDriver: %s",
              [[replyToNovaLINKDriver localizedDescription] UTF8String]);
     reply(replyToNovaLINKDriver);
+}
+
+- (void) startFallbackPlayThroughSyncWithReply:(void (^)(NSError*))reply forUISoundsDevice:(BOOL)isUI {
+    [self debugWarnIfCalledByNovaLINKApp];
+
+    // Prefer the companion app when it is connected.
+    if (sNovaLINKAppConnection) {
+        DebugMsg("NovaLINKXPCHelperService::startFallbackPlayThroughSyncWithReply: "
+                 "NovaLINKApp is connected; forwarding to app playthrough.");
+        [self startNovaLINKAppPlayThroughSyncWithReply:reply forUISoundsDevice:isUI];
+        return;
+    }
+
+    DebugMsg("NovaLINKXPCHelperService::startFallbackPlayThroughSyncWithReply: "
+             "Starting Helper-hosted fallback playthrough (ui=%d)", isUI);
+    NSError* startError = [[NovaLINKFallbackPlayThrough sharedInstance] startForUISoundsDevice:isUI];
+    reply(startError);
+}
+
+- (void) stopFallbackPlayThrough {
+    [self debugWarnIfCalledByNovaLINKApp];
+    [[NovaLINKFallbackPlayThrough sharedInstance] stop];
 }
 
 - (void) setOutputDeviceToMakeDefaultOnAbnormalTermination:(AudioObjectID)deviceID {

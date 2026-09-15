@@ -47,12 +47,14 @@ static NSString* kNovaLINKXPCHelperMachServiceName = @kNovaLINKXPCHelperBundleID
 // one of the kNovaLINKXPC_* error codes. It may have an underlying error using one of the NSXPCConnection* error codes from FoundationErrors.h.
 - (void) startNovaLINKAppPlayThroughSyncWithReply:(void (^)(NSError*))reply forUISoundsDevice:(BOOL)isUI;
 
-// NovaLINKXPCHelper will set the system's default output device to deviceID if it loses its connection
-// to NovaLINKApp and NovaLINKApp has left NovaLINKDevice as the default device. It waits for a short time first to
-// give NovaLINKApp a chance to fix the connection.
-//
-// This is so NovaLINKDevice isn't left as the default device if NovaLINKApp crashes or otherwise terminates
-// abnormally. If audio is played to NovaLINKDevice and NovaLINKApp isn't running, the user won't hear it.
+// When the companion app is not registered, NovaLINKDriver asks NovaLINKXPCHelper to host playthrough itself,
+// routing NovaLINKDevice to the system's current non-NovaLINK default output device.
+- (void) startFallbackPlayThroughSyncWithReply:(void (^)(NSError*))reply forUISoundsDevice:(BOOL)isUI;
+- (void) stopFallbackPlayThrough;
+
+// NovaLINKXPCHelper stores the last non-NovaLINK output device so that if fallback playthrough
+// cannot be started after NovaLINKApp disconnects, it can restore that device as the OS default.
+// Prefer keeping NovaLINK as default and hosting fallback playthrough instead.
 - (void) setOutputDeviceToMakeDefaultOnAbnormalTermination:(AudioObjectID)deviceID;
     
 @end
