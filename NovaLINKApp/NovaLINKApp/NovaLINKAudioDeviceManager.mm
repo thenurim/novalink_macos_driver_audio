@@ -213,6 +213,40 @@
                            revertOnFailure:revertOnFailure];
 }
 
+// If NovaLINKDevice's own AudioObjectID has gone bad (most likely because something restarted
+// coreaudiod out from under us — e.g. another installer replacing the driver bundle), replace
+// `novaLINKDevice` with a freshly re-resolved instance. Every other object here (deviceControlSync,
+// playThrough, playThrough_UISounds) re-reads `*novaLINKDevice` on every switch, so updating this
+// one ivar is enough to un-stick them without recreating the whole manager.
+- (void) reresolveNovaLINKDeviceIfDead {
+    @try {
+        [stateLock lock];
+
+        bool novaLINKDeviceAlive = false;
+        NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+            novaLINKDeviceAlive = novaLINKDevice->IsAlive();
+        });
+
+        if (!novaLINKDeviceAlive) {
+            try {
+                NovaLINKDevice* freshNovaLINKDevice = new NovaLINKDevice;
+                delete novaLINKDevice;
+                novaLINKDevice = freshNovaLINKDevice;
+                LogWarning("NovaLINKAudioDeviceManager::reresolveNovaLINKDeviceIfDead: "
+                           "NovaLINKDevice's own AudioObjectID was invalid (probably coreaudiod "
+                           "restarted externally) — re-resolved a fresh one. newID=%u",
+                           novaLINKDevice->GetObjectID());
+            } catch (const CAException& e) {
+                LogError("NovaLINKAudioDeviceManager::reresolveNovaLINKDeviceIfDead: Failed to "
+                         "re-resolve NovaLINKDevice. (%d)",
+                         e.GetError());
+            }
+        }
+    } @finally {
+        [stateLock unlock];
+    }
+}
+
 - (NSError* __nullable) setOutputDeviceWithIDImpl:(AudioObjectID)newDeviceID
                                      dataSourceID:(UInt32* __nullable)dataSourceID
                                   revertOnFailure:(BOOL)revertOnFailure {
@@ -223,6 +257,14 @@
         [stateLock lock];
 
         AudioDeviceID currentDeviceID = outputDevice.GetObjectID();  // (Doesn't throw.)
+
+        // Something external (another installer replacing the driver bundle and running
+        // `killall coreaudiod`, a macOS update, ...) can restart coreaudiod out from under us.
+        // That invalidates NovaLINKDevice's own AudioObjectID — not just whichever real output
+        // device we're about to switch to — and every HAL call routed through it then fails the
+        // same way regardless of the target, forever, because nothing else here ever re-resolves
+        // it. Detect that up front and self-heal before touching the target device at all.
+        [self reresolveNovaLINKDeviceIfDead];
 
         // AudioObjectIDs are just per-boot-session HAL handles. While a device is still
         // settling right after boot (Bluetooth reconnecting, coreaudiod restarting IO for a
@@ -251,6 +293,8 @@
 
                 if (e.GetError() == kAudioHardwareBadObjectError &&
                     retryDeadline.timeIntervalSinceNow > 0) {
+                    [self reresolveNovaLINKDeviceIfDead];
+
                     AudioObjectID reresolvedID = kAudioObjectUnknown;
                     if (targetDeviceUID) {
                         CAHALAudioSystemObject audioSystem;
