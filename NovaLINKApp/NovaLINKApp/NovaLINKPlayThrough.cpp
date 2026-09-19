@@ -40,6 +40,7 @@
 #include <mach/mach_init.h>
 #include <mach/mach_time.h>
 #include <mach/task.h>
+#include <pthread.h>
 
 
 // The number of IO cycles (roughly) to wait for our IOProcs to stop themselves before assuming something
@@ -126,9 +127,9 @@ void    NovaLINKPlayThrough::Activate()
         
         mActive = true;
 
-        // Called directly (not via a lambda) so -Wthread-safety-analysis can see mStateMutex.
-        // SyncIOParametersToDevices already logs and swallows CAExceptions internally.
-        SyncIOParametersToDevices();
+        // Do not SetNominalSampleRate / SetIOBufferSize here. Those HAL calls (especially on
+        // Bluetooth) block coreaudiod and freeze System Settings + the output-device picker.
+        // Rate matching happens in Start(), only when a client actually needs playthrough.
         
         DebugMsg("NovaLINKPlayThrough::Activate: Registering for notifications from NovaLINKDevice.");
         
@@ -175,7 +176,22 @@ void    NovaLINKPlayThrough::Activate()
                        "than NovaLINKDevice. This hasn't been tested and is almost definitely a bug.");
             NovaLINKAssert(false, "NovaLINKPlayThrough::Activate: !mInputDevice.IsNovaLINKDeviceInstance()");
         }
+
+        ScheduleRunningStateCatchUp();
     }
+}
+
+void    NovaLINKPlayThrough::ScheduleRunningStateCatchUp()
+{
+    // Idle launch stays idle: HandleNovaLINKDeviceIsRunning defaults to false if the custom
+    // property Get fails, and Start() is skipped unless a non-App client is already playing.
+    auto catchUp = ^{
+        HandleNovaLINKDeviceIsRunning(this);
+    };
+    dispatch_queue_t queue = NovaLINKGetDispatchQueue_PriorityUserInteractive();
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC), queue, catchUp);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), queue, catchUp);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), queue, catchUp);
 }
 
 void    NovaLINKPlayThrough::Deactivate()
@@ -579,6 +595,14 @@ void    NovaLINKPlayThrough::ReconcileSampleRatesToOutput()
         return;
     }
 
+    // Adding rate listeners in Activate can fire this while playthrough is idle. SetNominalSampleRate
+    // then serializes coreaudiod and System Settings / the output picker never open.
+    if(!mPlayingThrough)
+    {
+        DebugMsg("NovaLINKPlayThrough::ReconcileSampleRatesToOutput: idle — skipping");
+        return;
+    }
+
     // Output may have switched A2DP↔HFP (channel count / bytes-per-frame change).
     const UInt32 previousChannels = mOutputChannels.load();
     const UInt32 previousBytesPerFrame = mOutputBytesPerFrame.load();
@@ -860,6 +884,20 @@ void    NovaLINKPlayThrough::SetDevices(const NovaLINKAudioDevice* __nullable in
 
 void    NovaLINKPlayThrough::Start()
 {
+    // StartIOProc must never run on the main thread. It can block for a long time (Bluetooth)
+    // and, on modern macOS, deadlocks coreaudiod if a HAL property listener is also waiting —
+    // which freezes System Settings and the companion status-item menu.
+    if(pthread_main_np())
+    {
+        DebugMsg("NovaLINKPlayThrough::Start: bouncing off main thread");
+        dispatch_async(NovaLINKGetDispatchQueue_PriorityUserInteractive(), ^{
+            NovaLINKLogAndSwallowExceptions("NovaLINKPlayThrough::Start", [&] {
+                this->Start();
+            });
+        });
+        return;
+    }
+
     AudioDeviceIOProcID inputProcID = nullptr;
     AudioDeviceIOProcID outputProcID = nullptr;
     bool restartAfterPartialStop = false;
@@ -983,6 +1021,12 @@ void    NovaLINKPlayThrough::Start()
         return;
     }
 
+    // Match clocks before lighting hardware IO. Must not run under mStateMutex — SetNominalSampleRate
+    // on the real output (or a plugin config change on NovaLINK) can block coreaudiod.
+    NovaLINKLogAndSwallowExceptions("NovaLINKPlayThrough::Start", [&] {
+        SyncIOParametersToDevices();
+    });
+
     // Start the real output device first, then NovaLINK input.
     //
     // Starting NovaLINK (input) first nests another StartIO on the virtual device while a client
@@ -1033,7 +1077,19 @@ void    NovaLINKPlayThrough::Start()
 
 bool    NovaLINKPlayThrough::ClientsArePlaying() const
 {
-    return IsRunningSomewhereOtherThanNovaLINKApp(mInputDevice);
+    if(!mActive || mInputDevice.GetObjectID() == kAudioObjectUnknown)
+    {
+        return false;
+    }
+
+    try
+    {
+        return IsRunningSomewhereOtherThanNovaLINKApp(mInputDevice);
+    }
+    catch(...)
+    {
+        return false;
+    }
 }
 
 OSStatus    NovaLINKPlayThrough::WaitForOutputDeviceToStart() noexcept
@@ -1480,9 +1536,9 @@ void    NovaLINKPlayThrough::HandleNovaLINKDeviceIsRunning(NovaLINKPlayThrough* 
             return;
         }
 
-        // Set to true initially because if we fail to get this property from NovaLINKDevice we want to
-        // try to start playthrough anyway.
-        bool isRunningSomewhereOtherThanNovaLINKApp = true;
+        // Default false: AddPropertyListener / a failed custom-property Get must not StartIOProc
+        // at idle (that wedges coreaudiod). Real clients start playthrough via XPC StartIO.
+        bool isRunningSomewhereOtherThanNovaLINKApp = false;
 
         {
             CAMutex::Locker stateLocker(refCon->mStateMutex);

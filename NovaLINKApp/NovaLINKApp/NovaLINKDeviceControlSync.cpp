@@ -174,61 +174,71 @@ OSStatus    NovaLINKDeviceControlSync::NovaLINKDeviceListenerProc(AudioObjectID 
     // refCon (reference context) is the instance that registered this listener proc.
     NovaLINKDeviceControlSync* refCon = static_cast<NovaLINKDeviceControlSync*>(inClientData);
 
-    auto checkState = [&] {
-        if(!refCon)
+    if(!refCon)
+    {
+        LogError("NovaLINKDeviceControlSync::NovaLINKDeviceListenerProc: !refCon");
+        return 0;
+    }
+
+    bool copyVolume = false;
+    bool copyMute = false;
+    AudioObjectPropertyScope volumeScope = kAudioObjectPropertyScopeOutput;
+    AudioObjectPropertyScope muteScope = kAudioObjectPropertyScopeOutput;
+
+    for(int i = 0; i < inNumberAddresses; i++)
+    {
+        switch(inAddresses[i].mSelector)
         {
-            LogError("NovaLINKDeviceControlSync::NovaLINKDeviceListenerProc: !refCon");
-            return false;
+            case kAudioDevicePropertyVolumeScalar:
+                copyVolume = true;
+                volumeScope = inAddresses[i].mScope;
+                break;
+
+            case kAudioDevicePropertyMute:
+                copyMute = true;
+                muteScope = inAddresses[i].mScope;
+                break;
+
+            default:
+                break;
         }
+    }
+
+    if(!copyVolume && !copyMute)
+    {
+        return 0;
+    }
+
+    // Never call HAL from inside a property listener proc. coreaudiod waits for this function to
+    // return; CopyVolumeFrom/CopyMuteFrom Get+Set the same (or related) properties and deadlock
+    // the HAL — System Settings Sound pane and the companion menu both freeze.
+    dispatch_async(NovaLINKGetDispatchQueue_PriorityUserInteractive(), ^{
+        CAMutex::Locker locker(refCon->mMutex);
 
         if(!refCon->mActive ||
            (refCon->mNovaLINKDevice.GetObjectID() == kAudioObjectUnknown) ||
            (refCon->mOutputDevice.GetObjectID() == kAudioObjectUnknown))
         {
-            return false;
+            return;
         }
 
         if(inObjectID != refCon->mNovaLINKDevice.GetObjectID())
         {
             LogError("NovaLINKDeviceControlSync::NovaLINKDeviceListenerProc: notified about audio object other than NovaLINKDevice");
-            return false;
+            return;
         }
-        
-        return true;
-    };
 
-    for(int i = 0; i < inNumberAddresses; i++)
-    {
-        AudioObjectPropertyScope scope = inAddresses[i].mScope;
-        
-        switch(inAddresses[i].mSelector)
-        {
-            case kAudioDevicePropertyVolumeScalar:
-                {
-                    CAMutex::Locker locker(refCon->mMutex);
-
-                    // Update the output device's volume.
-                    if(checkState())
-                    {
-                        refCon->mOutputDevice.CopyVolumeFrom(refCon->mNovaLINKDevice, scope);
-                    }
-                }
-                break;
-                
-            case kAudioDevicePropertyMute:
-                {
-                    CAMutex::Locker locker(refCon->mMutex);
-
-                    // Update the output device's mute control. Note that this also runs when you
-                    // change the volume (on NovaLINKDevice).
-                    if(checkState())
-                    {
-                        refCon->mOutputDevice.CopyMuteFrom(refCon->mNovaLINKDevice, scope);
-                    }
-                }
-                break;
-        }
-    }
+        NovaLINKLogAndSwallowExceptions("NovaLINKDeviceControlSync::NovaLINKDeviceListenerProc", [&] {
+            if(copyVolume)
+            {
+                refCon->mOutputDevice.CopyVolumeFrom(refCon->mNovaLINKDevice, volumeScope);
+            }
+            if(copyMute)
+            {
+                refCon->mOutputDevice.CopyMuteFrom(refCon->mNovaLINKDevice, muteScope);
+            }
+        });
+    });
 
     // "The return value [of an AudioObjectPropertyListenerProc] is currently unused and should always be 0."
     return 0;

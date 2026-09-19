@@ -56,6 +56,10 @@ static NSString* const kNovaLINKQuitAgentForCompanionUINotification =
     @"life.thenurim.novalink.QuitAgentForCompanionUI";
 static NSString* const kPassthroughAgentLabel = @"life.thenurim.novalink.PassthroughAgent";
 
+@interface NovaLINKAppDelegate ()
+- (void) schedulePlayThroughCatchUpIfClientsPlaying;
+@end
+
 @implementation NovaLINKAppDelegate {
     // The button in the system status bar that shows the main menu.
     NovaLINKStatusBarItem* statusBarItem;
@@ -106,20 +110,9 @@ static NSString* const kPassthroughAgentLabel = @"life.thenurim.novalink.Passthr
     
     haveShownXPCHelperErrorMessage = NO;
 
-    // Set up audioDevices, which coordinates NovaLINKDevice and the output device. It manages
-    // playthrough, volume/mute controls, etc.
-    if (![self initAudioDeviceManager]) {
-        return;
-    }
-
-    // Stored user settings
-    userDefaults = [self createUserDefaults];
-
-    // Status bar companion UI (output device menu, prefs). Shown in agent mode too so the
-    // LaunchAgent-hosted process is visible and usable without a separate Finder launch.
-    statusBarItem = [[NovaLINKStatusBarItem alloc] initWithMenu:self.novaLINKMenu
-                                              audioDevices:audioDevices
-                                              userDefaults:userDefaults];
+    // Do not query CoreAudio here. GetAudioDeviceForUID on the main thread deadlocks
+    // coreaudiod (IME, screenshot, System Settings, other apps all freeze). Lookup runs
+    // from applicationDidFinishLaunching on a background queue.
     if (agentMode) {
         NSLog(@"NovaLINKAppDelegate: starting in --agent mode (status bar on, OS default unchanged)");
     }
@@ -144,36 +137,77 @@ static NSString* const kPassthroughAgentLabel = @"life.thenurim.novalink.Passthr
 - (void) applicationDidFinishLaunching:(NSNotification*)aNotification {
     #pragma unused (aNotification)
     
-    // Log the version/build number.
-    //
-    // TODO: NSLog should only be used for logging errors.
-    // TODO: Automatically add the commit ID to the end of the build number for unreleased builds. (In the
-    //       Info.plist or something -- not here.)
     NSLog(@"NovaLINKApp version: %@, NovaLINKApp build number: %@",
           NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"],
           NSBundle.mainBundle.infoDictionary[@"CFBundleVersion"]);
 
-    // Handles changing (or not changing) the output device when devices are added or removed. Must
-    // be initialised before calling setNovaLINKDeviceAsDefault.
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        [self waitForAudioDeviceManagerThenContinue];
+    });
+}
+
+static const int64_t kHALDeviceLookupTimeoutNsec = 8 * NSEC_PER_SEC;
+static NSString* const kNovaLINKDriverBundlePath =
+    @"/Library/Audio/Plug-Ins/HAL/NovaLINK Audio Device.driver";
+
+- (void) waitForAudioDeviceManagerThenContinue {
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    dispatch_queue_t lookupQueue = dispatch_queue_create("life.thenurim.novalink.HALLookup",
+                                                         DISPATCH_QUEUE_SERIAL);
+
+    dispatch_async(lookupQueue, ^{
+        [self initAudioDeviceManager];
+        dispatch_semaphore_signal(done);
+    });
+
+    const long timedOut = dispatch_semaphore_wait(
+            done, dispatch_time(DISPATCH_TIME_NOW, kHALDeviceLookupTimeoutNsec));
+
+    if (timedOut || !audioDevices) {
+        const BOOL driverPresent =
+            [[NSFileManager defaultManager] fileExistsAtPath:kNovaLINKDriverBundlePath];
+        NSLog(@"NovaLINKAppDelegate: NovaLINK device lookup %@ (driver bundle %@)",
+              timedOut ? @"timed out" : @"failed",
+              driverPresent ? @"present" : @"missing");
+        [self handleNovaLINKDeviceUnavailableDriverPresent:driverPresent];
+        return;
+    }
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self completeLaunchAfterAudioDeviceManagerReady];
+    });
+}
+
+- (void) handleNovaLINKDeviceUnavailableDriverPresent:(BOOL)driverPresent {
+    if (agentMode) {
+        // KeepAlive SuccessfulExit=false: 0 stays down (uninstall / no driver),
+        // 1 retries after coreaudiod has had a chance to finish loading the plugin.
+        _exit(driverPresent ? 1 : 0);
+    }
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self showNovaLINKDeviceNotFoundErrorMessageAndExit];
+    });
+}
+
+- (void) completeLaunchAfterAudioDeviceManagerReady {
+    userDefaults = [self createUserDefaults];
+
+    statusBarItem = [[NovaLINKStatusBarItem alloc] initWithMenu:self.novaLINKMenu
+                                              audioDevices:audioDevices
+                                              userDefaults:userDefaults];
+
     preferredOutputDevices =
         [[NovaLINKPreferredOutputDevices alloc] initWithDevices:audioDevices userDefaults:userDefaults];
 
-    // Skip this if we're compiling on a version of macOS before 10.14 as won't compile and it
-    // isn't needed.
 #if MAC_OS_X_VERSION_MAX_ALLOWED >= 101400  // MAC_OS_X_VERSION_10_14
     if (@available(macOS 10.14, *)) {
-        // On macOS 10.14+ we need microphone permission for playthrough (virtual input) and
-        // hardware-mic inject. Use a single coalesced prompt — never call requestAccess or
-        // StartIOProc on input devices until this completes.
         [NovaLINKMicrophoneAccess requestAccessIfNeededWithCompletion:^(BOOL granted) {
             if (granted) {
                 DebugMsg("NovaLINKAppDelegate::applicationDidFinishLaunching: Permission granted");
             } else {
                 NSLog(@"NovaLINKAppDelegate::applicationDidFinishLaunching: Permission denied");
                 if (self->agentMode) {
-                    // Stay alive with the menu bar so the user can open System Settings.
-                    // Exiting here races KeepAlive and can restart-loop. Input IO stays gated
-                    // until Microphone access is enabled for this binary.
                     NSLog(@"NovaLINKAppDelegate: grant Microphone access to "
                           "\"NovaLINK Audio Passthrough\" in System Settings → Privacy & Security "
                           "→ Microphone, then pick an output device again (or relaunch the agent).");
@@ -188,29 +222,41 @@ static NSString* const kPassthroughAgentLabel = @"life.thenurim.novalink.Passthr
             }
             [self continueLaunchAfterInputDevicePermissionGranted];
         }];
+        return;
     }
-    else
 #endif
-    {
-        // We can change the device immediately on older versions of macOS because they don't
-        // require user permission for input devices.
-        [self continueLaunchAfterInputDevicePermissionGranted];
-    }
+    [self continueLaunchAfterInputDevicePermissionGranted];
 }
 
 - (void) continueLaunchAfterInputDevicePermissionGranted {
+    // HAL StartIOProc / SetNominalSampleRate can block for a long time (especially Bluetooth)
+    // and deadlock coreaudiod if they run on the main thread. Keep AppKit responsive so the
+    // status-item menu and System Settings still work while output IO starts.
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        [self continueLaunchOffMainThread];
+    });
+}
+
+- (void) continueLaunchOffMainThread {
     // Choose an output device for NovaLINKApp to use to play audio.
     if (![self setInitialOutputDevice]) {
         return;
     }
 
-    // Make NovaLINKDevice the default device — but not in agent mode. The agent only hosts
-    // playthrough for when the user (or another client) has already selected NovaLINK.
-    if (!agentMode) {
-        [self setNovaLINKDeviceAsDefault];
-        didSetNovaLINKAsOSDefault = YES;
-    }
+    // Hardware-mic demand monitoring (deferred from AudioDeviceManager -init so awakeFromNib
+    // cannot StartIOProc a mic on the main thread).
+    [audioDevices startMicDemandMonitoring];
 
+    // Steal the OS default only after the XPC listener is up (finishLaunchOnMainThread).
+    // Doing it here races StartIO → XPC: apps switch to NovaLINK before we can accept the
+    // playthrough kick, then DeviceIsRunning is already true so the listener never fires.
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self finishLaunchOnMainThread];
+    });
+}
+
+- (void) finishLaunchOnMainThread {
     // Handle some of the unusual reasons NovaLINKApp might have to exit, mostly crashes.
     NovaLINKTermination::SetUpTerminationCleanUp(audioDevices);
 
@@ -247,22 +293,36 @@ static NSString* const kPassthroughAgentLabel = @"life.thenurim.novalink.Passthr
                        dispatch_get_main_queue(), ^{
             [self->statusBarItem ensureVisible];
         });
-        // If clients are already writing to NovaLINK (user selected it before the agent
-        // finished launching), kick playthrough without waiting for another StartIO/XPC edge.
-        // PlayThrough::Start no-ops when no non-App clients are present, so this will not
-        // light the microphone privacy indicator on a cold launch.
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            OSStatus errMain = [self->audioDevices startPlayThroughSync:NO];
-            OSStatus errUI = [self->audioDevices startPlayThroughSync:YES];
-            NSLog(@"NovaLINKAppDelegate: agent initial playthrough kick "
-                  "(main=%d ui=%d)", (int)errMain, (int)errUI);
-        });
     } else if (statusBarItem) {
         [statusBarItem ensureVisible];
     }
 
     continueLaunchCompleted = YES;
+
+    // XPC is listening. Steal OS default (GUI only) on a background queue so StartIO from
+    // newly-routed apps can reach us. Then catch up playthrough if clients were already
+    // doing IO on NovaLINK — StartIO will not fire again, and DeviceIsRunning will not change.
+    // Idle LaunchAgent start stays idle (no Bluetooth StartIOProc / coreaudiod wedge).
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!self->agentMode) {
+            [self setNovaLINKDeviceAsDefault];
+            self->didSetNovaLINKAsOSDefault = YES;
+        }
+        [self schedulePlayThroughCatchUpIfClientsPlaying];
+    });
+}
+
+- (void) schedulePlayThroughCatchUpIfClientsPlaying {
+    void (^kick)(void) = ^{
+        [self->audioDevices startPlayThroughIfClientsPlaying];
+    };
+    // Immediate check covers clients that kept IO open across relaunch.
+    // Delayed retries cover apps that StartIO after we steal the OS default.
+    kick();
+    dispatch_queue_t queue = NovaLINKGetDispatchQueue_PriorityUserInteractive();
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC), queue, kick);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), queue, kick);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), queue, kick);
 }
 
 - (void) handleQuitAgentForCompanionUINotification:(NSNotification*)notification {
@@ -325,21 +385,19 @@ static NSString* const kPassthroughAgentLabel = @"life.thenurim.novalink.Passthr
     }
 
     if (!didSetNovaLINKAsOSDefault) {
-        [self setNovaLINKDeviceAsDefault];
-        didSetNovaLINKAsOSDefault = YES;
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            [self setNovaLINKDeviceAsDefault];
+            self->didSetNovaLINKAsOSDefault = YES;
+            [self schedulePlayThroughCatchUpIfClientsPlaying];
+        });
+    } else {
+        [self schedulePlayThroughCatchUpIfClientsPlaying];
     }
 }
 
-// Returns NO if (and only if) NovaLINKApp is about to terminate because of a fatal error.
 - (BOOL) initAudioDeviceManager {
     audioDevices = [NovaLINKAudioDeviceManager new];
-
-    if (!audioDevices) {
-        [self showNovaLINKDeviceNotFoundErrorMessageAndExit];
-        return NO;
-    }
-
-    return YES;
+    return audioDevices != nil;
 }
 
 // Returns NO if (and only if) NovaLINKApp is about to terminate because of a fatal error.

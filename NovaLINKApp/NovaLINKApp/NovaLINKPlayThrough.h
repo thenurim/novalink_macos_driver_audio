@@ -91,6 +91,13 @@ public:
     void                Deactivate();
 
 private:
+    /*!
+     Property listeners only fire on change. After companion relaunch, NovaLINK clients may
+     already have IO running so StartIO/XPC never fires and DeviceIsRunning stays true.
+     Sample the current running state (deferred) and Start() if needed.
+     */
+    void                ScheduleRunningStateCatchUp();
+
     void                AllocateBuffer() REQUIRES(mStateMutex);
     void                DeallocateBuffer();
     /*! Cache output ASBD fields used by the realtime IOProcs (channels / bytes per frame). */
@@ -116,8 +123,9 @@ private:
      rate-master transports, where Nominal can lie until/after StartIO.
      */
     Float64             EffectiveOutputSampleRate() const;
-    /*! Match NovaLINK sample rate / buffer size to the real output. @throws CAException */
-    void                SyncIOParametersToDevices() REQUIRES(mStateMutex);
+    /*! Match NovaLINK sample rate / buffer size to the real output. Call outside mStateMutex —
+     these HAL sets can block coreaudiod. @throws CAException */
+    void                SyncIOParametersToDevices();
     /*!
      Re-read the output clock after IO has started (when Actual becomes trustworthy) and match
      NovaLINK if needed. Safe to call from a non-realtime queue.

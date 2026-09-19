@@ -63,12 +63,9 @@ if [ "$user_prompt" == "y" ] || [ "$user_prompt" == "Y" ]; then
   # Invalidate sudo ticket
   sudo -k
 
-  # Open System Settings and go to Sound > Output.
-  osascript -e 'tell application id "com.apple.systempreferences"
-                  activate
-                  reveal anchor "output" of pane id "com.apple.preference.sound"
-                end tell' >/dev/null || true
   echo ""
+  echo "If audio still looks stuck, restart the computer (or open System Settings → Sound and"
+  echo "toggle the output device once coreaudiod has recovered)."
 
 else
   echo "Uninstall cancelled."

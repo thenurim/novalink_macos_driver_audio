@@ -474,7 +474,7 @@ wait_for_coreaudiod_and_novalink_hal() {
   # Generous settle: loading the HAL plugin right after a recycle is when
   # coreaudiod is most likely to spin if clients attach too early.
   # Never probe via system_profiler/CoreAudio here — those calls can hang.
-  sleep 6
+  sleep 10
   if [[ -d "${INSTALLED_DRIVER_PATH}" ]]; then
     echo "coreaudiod up; driver bundle present at ${INSTALLED_DRIVER_PATH}"
   else
@@ -516,7 +516,7 @@ agent_log_ready_since_marker() {
   # awk avoids macOS BSD grep quirks with -A / -- option ordering.
   awk -v marker="${marker}" '
     $0 == marker { seen = 1; next }
-    seen && /starting in --agent mode|agent playthrough host ready|Permission denied|grant Microphone access/ {
+    seen && /agent playthrough host ready|Permission denied|grant Microphone access/ {
       found = 1
       exit
     }

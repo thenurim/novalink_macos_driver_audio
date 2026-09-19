@@ -97,9 +97,19 @@ static const int kNovaLINKErrorCode_ReturningEarly       = 2;
 // code received from the HAL.
 - (OSStatus) startPlayThroughSync:(BOOL)forUISoundsDevice;
 
+// If a client other than this app is already doing IO on NovaLINK (companion relaunch while
+// playback continues), start playthrough. Idle launch is a no-op so LaunchAgent start does
+// not light Bluetooth / block coreaudiod.
+- (void) startPlayThroughIfClientsPlaying;
+
 // When the output device is changed, NovaLINKAudioDeviceManager will send the ID of the new output
 // device to NovaLINKXPCHelper through this connection.
 - (void) setNovaLINKXPCHelperConnection:(NSXPCConnection* __nullable)connection;
+
+// Start hardware-mic demand monitoring (HAL listeners). Call after launch settle — not from -init,
+// which runs on the main thread during awakeFromNib and can StartIOProc a mic while AppKit is
+// still coming up (freezes the status-item menu and System Settings).
+- (void) startMicDemandMonitoring;
 
 @end
 

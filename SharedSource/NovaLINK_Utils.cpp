@@ -179,13 +179,13 @@ namespace NovaLINK_Utils
         }
         catch(const CAException& e)
         {
-            // TODO: Can/should we log a stack trace somewhere? (If so, also in the following catch
-            //       block.)
-            // TODO: Log a warning instead of an error for expected exceptions?
             OSStatus err = e.GetError();
             const char err4CC[5] = CA4CCToCString(err);
 
-            LogError("%s:%d:%s: %sCAException, code: '%s' (%d). %s%s %s %s ",
+            // Expected exceptions are swallowed. LogError abort()s in Debug, which crash-loops the
+            // LaunchAgent (KeepAlive) on the first HAL probe at idle launch.
+            auto logFn = expected ? LogWarning : LogError;
+            logFn("%s:%d:%s: %sCAException, code: '%s' (%d). %s%s %s %s ",
                      (fileName ? fileName : ""),
                      lineNumber,
                      callerName,
@@ -210,7 +210,8 @@ namespace NovaLINK_Utils
         }
         catch(...)
         {
-            LogError("%s:%d:%s: %s exception. %s%s %s %s",
+            auto logFn = expected ? LogWarning : LogError;
+            logFn("%s:%d:%s: %s exception. %s%s %s %s",
                      (fileName ? fileName : ""),
                      lineNumber,
                      callerName,

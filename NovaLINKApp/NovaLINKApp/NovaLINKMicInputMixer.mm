@@ -466,18 +466,6 @@ static OSStatus MicInputIOProc(AudioObjectID,
     return demanded;
 }
 
-- (void) syncToCaptureDemand {
-    if ([self isCaptureDemanded]) {
-        DebugMsg("NovaLINKMicInputMixer: Capture client reading NovaLINK input — ensuring mic inject");
-        [self ensureStarted];
-    } else {
-        DebugMsg("NovaLINKMicInputMixer: No capture client — stopping mic inject");
-        @synchronized (_lock) {
-            [self stopIOLocked];
-        }
-    }
-}
-
 - (void) installDemandListenerOnDevice:(AudioObjectID)novaID {
     if (novaID == kAudioObjectUnknown) {
         return;
@@ -531,10 +519,36 @@ static OSStatus MicInputIOProc(AudioObjectID,
 }
 
 - (void) startDemandMonitoring {
+    if ([NSThread isMainThread]) {
+        dispatch_async(_demandQueue, ^{
+            [self startDemandMonitoring];
+        });
+        return;
+    }
+
     NovaLINKDevice novaLINKDevice;
     AudioObjectID novaID = novaLINKDevice.GetObjectID();
     [self installDemandListenerOnDevice:novaID];
     [self syncToCaptureDemand];
+}
+
+- (void) syncToCaptureDemand {
+    if ([NSThread isMainThread]) {
+        dispatch_async(_demandQueue, ^{
+            [self syncToCaptureDemand];
+        });
+        return;
+    }
+
+    if ([self isCaptureDemanded]) {
+        DebugMsg("NovaLINKMicInputMixer: Capture client reading NovaLINK input — ensuring mic inject");
+        [self ensureStarted];
+    } else {
+        DebugMsg("NovaLINKMicInputMixer: No capture client — stopping mic inject");
+        @synchronized (_lock) {
+            [self stopIOLocked];
+        }
+    }
 }
 
 - (void) stopIOLocked {

@@ -66,7 +66,12 @@ static NSInteger const kOutputDeviceMenuItemTag = 5;
         outputDeviceMenuItems = [NSMutableArray new];
 
         [self listenForDevicesAddedOrRemoved];
-        [self populateNovaLINKMenu];
+        // Defer the first HAL device enumeration so launch can finish and System Settings
+        // can open. Enumerating every device synchronously here blocks coreaudiod.
+        NovaLINKOutputDeviceMenuSection* __weak weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf populateNovaLINKMenu];
+        });
     }
     
     return self;

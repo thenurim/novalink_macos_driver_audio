@@ -51,8 +51,15 @@ file_paths=("${app_path}" "${driver_path}" "${xpc_path1}" "${xpc_path2}")
 
 novalink_app_process_name="NovaLINK Audio Passthrough"
 
-launchd_plist_label="com.bearisdriving.NovaLINK.XPCHelper"
-launchd_plist="/Library/LaunchDaemons/${launchd_plist_label}.plist"
+# Legacy BGM-era helper (may not be installed).
+legacy_launchd_plist_label="com.bearisdriving.NovaLINK.XPCHelper"
+legacy_launchd_plist="/Library/LaunchDaemons/${legacy_launchd_plist_label}.plist"
+
+helper_label="life.thenurim.novalink.XPCHelper"
+helper_plist="/Library/LaunchDaemons/${helper_label}.plist"
+
+agent_label="life.thenurim.novalink.PassthroughAgent"
+agent_plist="${HOME}/Library/LaunchAgents/${agent_label}.plist"
 
 coreaudiod_plist="/System/Library/LaunchDaemons/com.apple.audio.coreaudiod.plist"
 
@@ -76,8 +83,46 @@ if ! sudo true; then
   exit 1
 fi
 
-# Try to kill NovaLINK Audio Passthrough.app, in case it's running.
+# Stop the background companion FIRST. KeepAlive will otherwise relaunch it the
+# moment we remove the driver, and its HAL lookup wedges coreaudiod (IME,
+# screenshot, System Settings, other apps all freeze).
+echo "Stopping NovaLINK LaunchAgent."
+uid="$(id -u)"
+launchctl bootout "gui/${uid}/${agent_label}" &>/dev/null || true
+if [ -f "${agent_plist}" ]; then
+  launchctl bootout "gui/${uid}" "${agent_plist}" &>/dev/null || true
+  launchctl unload "${agent_plist}" &>/dev/null || true
+fi
+launchctl disable "gui/${uid}/${agent_label}" &>/dev/null || true
+rm -f "${agent_plist}"
+if [ -f "/Library/LaunchAgents/${agent_label}.plist" ]; then
+  sudo rm -f "/Library/LaunchAgents/${agent_label}.plist"
+fi
+
+echo "Stopping NovaLINK Audio Passthrough."
 killall "${novalink_app_process_name}" &>/dev/null || true
+sleep 0.3
+killall -9 "${novalink_app_process_name}" &>/dev/null || true
+
+echo "Removing NovaLINK XPCHelper launchd service."
+if [ -f "${helper_plist}" ]; then
+  sudo launchctl bootout system "${helper_plist}" &>/dev/null || \
+    sudo launchctl unload "${helper_plist}" &>/dev/null || true
+  sudo mv -f "${helper_plist}" "${trash_dir}" 2>/dev/null || sudo rm -f "${helper_plist}"
+else
+  echo "  ${helper_label} does not exist."
+fi
+
+echo "Removing legacy NovaLINK launchd service."
+sudo launchctl list 2>/dev/null | grep "${legacy_launchd_plist_label}" >/dev/null && \
+  (sudo launchctl bootout system "${legacy_launchd_plist}" &>/dev/null || \
+    sudo launchctl unbootstrap system "${legacy_launchd_plist}" &>/dev/null || \
+    sudo launchctl unload "${legacy_launchd_plist}" >/dev/null) || \
+  echo "  Service does not exist."
+
+if [ -e "${legacy_launchd_plist}" ]; then
+  sudo mv -f "${legacy_launchd_plist}" "${trash_dir}"
+fi
 
 # TODO: Use
 #         mdfind kMDItemCFBundleIdentifier = "com.bearisdriving.NovaLINK.App"
@@ -97,19 +142,6 @@ for path in "${file_paths[@]}"; do
     fi
   fi
 done
-
-echo "Removing NovaLINK launchd service."
-sudo launchctl list | grep "${launchd_plist_label}" >/dev/null && \
-  (sudo launchctl bootout system "${launchd_plist}" &>/dev/null || \
-    # Try older versions of the command in case the user has an old version of launchctl.
-    sudo launchctl unbootstrap system "${launchd_plist}" &>/dev/null || \
-    sudo launchctl unload "${launchd_plist}" >/dev/null) || \
-  echo "  Service does not exist."
-
-echo "Removing NovaLINK launchd service configuration file."
-if [ -e "${launchd_plist}" ]; then
-  sudo mv -f "${launchd_plist}" "${trash_dir}"
-fi
 
 # Be paranoid about user_group_name because we really don't want to delete every user account.
 if ! [[ -z ${user_group_name} ]] && [[ "${user_group_name}" != "" ]]; then

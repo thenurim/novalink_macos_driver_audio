@@ -251,43 +251,10 @@ bool    NovaLINKDeviceControlsList::MatchControlsListOf(AudioObjectID inDeviceID
 
 void    NovaLINKDeviceControlsList::PropagateControlListChange()
 {
-    CAMutex::Locker locker(mMutex);
-
-    if((mNovaLINKDevice == kAudioObjectUnknown) || !mCanToggleDeviceOnSystem)
-    {
-        return;
-    }
-
-    InitDeviceToggling();
-
-    // Leave the default device alone if the user has changed it since launching NovaLINKApp.
-    bool novaLINKDeviceIsDefault = true;
-
-    NovaLINKLogAndSwallowExceptions("NovaLINKDeviceControlsList::PropagateControlListChange", ([&] {
-        novaLINKDeviceIsDefault =
-            (mNovaLINKDevice.GetObjectID() == mAudioSystem.GetDefaultAudioDevice(false, false));
-    }));
-
-    if(novaLINKDeviceIsDefault)
-    {
-        mDeviceToggleState = ToggleState::SettingNullDeviceAsDefault;
-
-        // We'll get a notification from the HAL after the Null Device is enabled. Then we can
-        // temporarily make it the default device, which gets other programs to notice that
-        // NovaLINKDevice's controls have changed.
-        try
-        {
-            CAMutex::Unlocker unlocker(mMutex);
-            SetNullDeviceEnabled(true);
-        }
-        catch (...)
-        {
-            mDeviceToggleState = ToggleState::NotToggling;
-            LogError("NovaLINKDeviceControlsList::PropagateControlListChange: Could not enable the Null "
-                     "Device");
-            throw;
-        }
-    }
+    // Enabling the Null Device and cycling the OS default output is a known coreaudiod
+    // deadlock: System Settings, screenshot shutter, IME, and unrelated apps all freeze.
+    // MatchControlsListOf already applied the enabled-controls property on NovaLINKDevice.
+    DebugMsg("NovaLINKDeviceControlsList::PropagateControlListChange: skipped null-device default toggle");
 }
 
 #pragma mark Implementation

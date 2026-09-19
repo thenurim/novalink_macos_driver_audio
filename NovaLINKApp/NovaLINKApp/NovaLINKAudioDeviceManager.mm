@@ -76,7 +76,6 @@
 
         try {
             novaLINKDevice = new NovaLINKDevice;
-            [[NovaLINKMicInputMixer sharedInstance] startDemandMonitoring];
         } catch (const CAException& e) {
             LogError("NovaLINKAudioDeviceManager::init: NovaLINKDevice not found. (%d)", e.GetError());
             self = nil;
@@ -104,6 +103,10 @@
 
 - (void) setOutputDeviceMenuSection:(NovaLINKOutputDeviceMenuSection*)menuSection {
     outputDeviceMenuSection = menuSection;
+}
+
+- (void) startMicDemandMonitoring {
+    [[NovaLINKMicInputMixer sharedInstance] startDemandMonitoring];
 }
 
 #pragma mark Systemwide Default Device
@@ -252,6 +255,9 @@
                                   revertOnFailure:(BOOL)revertOnFailure {
     DebugMsg("NovaLINKAudioDeviceManager::setOutputDeviceWithIDImpl: Setting output device. newDeviceID=%u",
              newDeviceID);
+
+    BOOL didChangeOutputDevice = NO;
+    BOOL clientsWerePlaying = NO;
     
     @try {
         [stateLock lock];
@@ -285,7 +291,9 @@
             try {
                 [self setOutputDeviceWithIDImpl:newDeviceID
                                    dataSourceID:dataSourceID
-                                currentDeviceID:currentDeviceID];
+                                currentDeviceID:currentDeviceID
+                          didChangeOutputDevice:&didChangeOutputDevice
+                             clientsWerePlaying:&clientsWerePlaying];
                 succeeded = YES;
             } catch (const CAException& e) {
                 NovaLINKAssert(e.GetError() != kAudioHardwareNoError,
@@ -315,7 +323,11 @@
                         newDeviceID = reresolvedID;
                     }
 
-                    [NSThread sleepForTimeInterval:0.3];
+                    // Never sleep on the main thread — that freezes the status-item menu
+                    // and any UI that is waiting on AppKit.
+                    if (![NSThread isMainThread]) {
+                        [NSThread sleepForTimeInterval:0.3];
+                    }
                     continue;
                 }
 
@@ -345,65 +357,25 @@
         [stateLock unlock];
     }
 
-    return nil;
-}
-
-// Throws CAException.
-- (void) setOutputDeviceWithIDImpl:(AudioObjectID)newDeviceID
-                      dataSourceID:(UInt32* __nullable)dataSourceID
-                   currentDeviceID:(AudioObjectID)currentDeviceID {
-    // Snapshot before we tear playthrough down / change NovaLINK's sample rate. Config changes
-    // can make Chrome briefly drop IO, so a post-switch StopIfIdle would race and kill the new
-    // output path while YouTube is still intended to be playing.
-    BOOL clientsPlaying = NO;
-    if (newDeviceID != currentDeviceID) {
+    // StartIOProc / SetNominalSampleRate wedge coreaudiod and freeze System Settings.
+    // Only start hardware IO when a non-App client is already playing (device switch mid-stream).
+    // Idle launch and idle device picks wait for StartIO/XPC/DeviceIsRunning instead.
+    if (didChangeOutputDevice && clientsWerePlaying) {
         NovaLINKLogAndSwallowExceptions("NovaLINKAudioDeviceManager::setOutputDeviceWithIDImpl", [&] {
-            clientsPlaying = playThrough.ClientsArePlaying() || playThrough_UISounds.ClientsArePlaying();
-        });
-
-        NovaLINKAudioDevice newOutputDevice(newDeviceID);
-        [self setOutputDeviceForPlaythroughAndControlSync:newOutputDevice];
-        outputDevice = newOutputDevice;
-    }
-
-    // Set the output device to use the new data source.
-    if (dataSourceID) {
-        // TODO: If this fails, ideally we'd still start playthrough and return an error, but not
-        //       revert the device. It would probably be a bit awkward, though.
-        [self setDataSource:*dataSourceID device:outputDevice];
-    }
-
-    if (newDeviceID != currentDeviceID) {
-        // We successfully changed to the new device. Start playthrough on it, since audio might be
-        // playing. (If we only changed the data source, playthrough will already be running if it
-        // needs to be.)
-        //
-        // Do not call StopIfIdle here. Device switches interrupt Chrome's IO; an idle-stop would
-        // tear down playthrough while audio is supposed to keep flowing. StopIfIdle is armed again
-        // only after a non-App client is observed playing (see NovaLINKPlayThrough::StopIfIdle).
-        playThrough.Start();
-        playThrough_UISounds.Start();
-        // If Chrome (etc.) never dropped IO across the switch, this arms idle-stop without
-        // stopping. If they did drop, StopIfIdle stays suppressed until they return.
-        NovaLINKLogAndSwallowExceptions("NovaLINKAudioDeviceManager::setOutputDeviceWithIDImpl", [&] {
+            playThrough.Start();
+            playThrough_UISounds.Start();
             playThrough.StopIfIdle();
             playThrough_UISounds.StopIfIdle();
         });
 
-        if (clientsPlaying) {
-            // Clients often restart IO after NovaLINK's sample rate/buffer change — nudge Start.
+        if (clientsWerePlaying) {
             auto restartPlaythrough = ^{
-                @try {
-                    [stateLock lock];
-                    NovaLINKLogAndSwallowExceptions("NovaLINKAudioDeviceManager::setOutputDeviceWithIDImpl", [&] {
-                        playThrough.Start();
-                        playThrough_UISounds.Start();
-                        playThrough.StopIfIdle();
-                        playThrough_UISounds.StopIfIdle();
-                    });
-                } @finally {
-                    [stateLock unlock];
-                }
+                NovaLINKLogAndSwallowExceptions("NovaLINKAudioDeviceManager::setOutputDeviceWithIDImpl", [&] {
+                    playThrough.Start();
+                    playThrough_UISounds.Start();
+                    playThrough.StopIfIdle();
+                    playThrough_UISounds.StopIfIdle();
+                });
             };
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
                            NovaLINKGetDispatchQueue_PriorityUserInteractive(),
@@ -412,6 +384,39 @@
                            NovaLINKGetDispatchQueue_PriorityUserInteractive(),
                            restartPlaythrough);
         }
+    }
+
+    return nil;
+}
+
+// Throws CAException.
+- (void) setOutputDeviceWithIDImpl:(AudioObjectID)newDeviceID
+                      dataSourceID:(UInt32* __nullable)dataSourceID
+                   currentDeviceID:(AudioObjectID)currentDeviceID
+             didChangeOutputDevice:(BOOL*)didChangeOutputDevice
+                clientsWerePlaying:(BOOL*)clientsWerePlaying {
+    *didChangeOutputDevice = NO;
+    *clientsWerePlaying = NO;
+
+    // Snapshot before we tear playthrough down / change NovaLINK's sample rate. Config changes
+    // can make Chrome briefly drop IO, so a post-switch StopIfIdle would race and kill the new
+    // output path while YouTube is still intended to be playing.
+    if (newDeviceID != currentDeviceID) {
+        NovaLINKLogAndSwallowExceptions("NovaLINKAudioDeviceManager::setOutputDeviceWithIDImpl", [&] {
+            *clientsWerePlaying = playThrough.ClientsArePlaying() || playThrough_UISounds.ClientsArePlaying();
+        });
+
+        NovaLINKAudioDevice newOutputDevice(newDeviceID);
+        [self setOutputDeviceForPlaythroughAndControlSync:newOutputDevice];
+        outputDevice = newOutputDevice;
+        *didChangeOutputDevice = YES;
+    }
+
+    // Set the output device to use the new data source.
+    if (dataSourceID) {
+        // TODO: If this fails, ideally we'd still start playthrough and return an error, but not
+        //       revert the device. It would probably be a bit awkward, though.
+        [self setDataSource:*dataSourceID device:outputDevice];
     }
 
     CFStringRef outputDeviceUID = outputDevice.CopyDeviceUID();
@@ -499,6 +504,20 @@
     return [NSError errorWithDomain:@kNovaLINKAppBundleID code:errorCode userInfo:info];
 }
 
+- (void) startPlayThroughIfClientsPlaying {
+    BOOL clientsPlaying = NO;
+    NovaLINKLogAndSwallowExceptions("NovaLINKAudioDeviceManager::startPlayThroughIfClientsPlaying", [&] {
+        clientsPlaying = playThrough.ClientsArePlaying() || playThrough_UISounds.ClientsArePlaying();
+    });
+    if (!clientsPlaying) {
+        return;
+    }
+
+    NSLog(@"NovaLINKAudioDeviceManager: NovaLINK clients already playing — catching up playthrough");
+    [self startPlayThroughSync:NO];
+    [self startPlayThroughSync:YES];
+}
+
 - (OSStatus) startPlayThroughSync:(BOOL)forUISoundsDevice {
     // We can only try for stateLock because setOutputDeviceWithID might have already taken it, then made a
     // HAL request to NovaLINKDevice and be waiting for the response. Some of the requests setOutputDeviceWithID
@@ -555,20 +574,14 @@
             constexpr int64_t kStartPlayThroughDeferNsec = 50 * NSEC_PER_MSEC;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, kStartPlayThroughDeferNsec),
                            NovaLINKGetDispatchQueue_PriorityUserInteractive(), ^{
-                @try {
-                    [stateLock lock];
+                NovaLINKPlayThrough& pt = (forUISoundsDevice ? playThrough_UISounds : playThrough);
 
-                    NovaLINKPlayThrough& pt = (forUISoundsDevice ? playThrough_UISounds : playThrough);
-
-                    NovaLINKLogAndSwallowExceptionsMsg("NovaLINKAudioDeviceManager::startPlayThroughSync",
-                                                  "Starting playthrough (dispatched)", [&] {
-                        pt.Start();
-                    });
-                    // Idle-stop is suppressed inside Start()/StopIfIdle until a non-App client is
-                    // observed again — do not call StopIfIdle here.
-                } @finally {
-                    [stateLock unlock];
-                }
+                NovaLINKLogAndSwallowExceptionsMsg("NovaLINKAudioDeviceManager::startPlayThroughSync",
+                                              "Starting playthrough (dispatched)", [&] {
+                    pt.Start();
+                });
+                // Idle-stop is suppressed inside Start()/StopIfIdle until a non-App client is
+                // observed again — do not call StopIfIdle here.
             });
         }
     } @finally {
