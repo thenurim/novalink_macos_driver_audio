@@ -48,10 +48,12 @@ static CGFloat const kVolumeIconAdditionalVerticalPadding = 0.075;
     NSImage* volumeIcon3SoundWaves;
 
     NSStatusItem* statusBarItem;
+    NSMenu* companionMenu;
     NovaLINKDebugLoggingMenuItem* debugLoggingMenuItem;
 
     NovaLINKVolumeChangeListener* volumeChangeListener;
     id __nullable clickEventHandler;
+    id __nullable workspaceWakeObserver;
 
     NovaLINKStatusBarIcon _icon;
 }
@@ -62,15 +64,11 @@ static CGFloat const kVolumeIconAdditionalVerticalPadding = 0.075;
                  audioDevices:(NovaLINKAudioDeviceManager*)devices
                  userDefaults:(NovaLINKUserDefaults*)defaults {
     if ((self = [super init])) {
-        statusBarItem =
-                [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
-        // LaunchAgent / early awakeFromNib: item can be created but not shown until marked visible.
-        if (@available(macOS 10.12, *)) {
-            statusBarItem.visible = YES;
-        }
-
+        companionMenu = novaLINKMenu;
         audioDevices = devices;
         userDefaults = defaults;
+
+        [self createStatusItem];
 
         // Initialise the icons.
         [self initIcons];
@@ -78,25 +76,24 @@ static CGFloat const kVolumeIconAdditionalVerticalPadding = 0.075;
         // Set the initial icon.
         self.icon = userDefaults.statusBarIcon;
 
-        // Set the menu item to open the main menu.
-        statusBarItem.menu = novaLINKMenu;
-
         // Monitor click events so we can show extra options in the menu if the user was holding the
-        // option key.
-        clickEventHandler = [self addClickMonitor];
-
-        // Set the accessibility label to "NovaLINK". (We intentionally don't set a title or
-        // a tooltip.)
-        if ([NovaLINKStatusBarItem buttonAvailable]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wpartial-availability"
-            statusBarItem.button.accessibilityLabel =
-                    [NSRunningApplication currentApplication].localizedName;
-#pragma clang diagnostic pop
+        // option key. Only needed on OS X 10.9, where NSStatusItem has no button/action.
+        if (![NovaLINKStatusBarItem buttonAvailable]) {
+            clickEventHandler = [self addClickMonitor];
         }
 
-        // Update the icon when NovaLINKDevice's volume changes.
         NovaLINKStatusBarItem* __weak weakSelf = self;
+        workspaceWakeObserver =
+            [[[NSWorkspace sharedWorkspace] notificationCenter]
+                addObserverForName:NSWorkspaceDidWakeNotification
+                            object:nil
+                             queue:[NSOperationQueue mainQueue]
+                        usingBlock:^(NSNotification* notification) {
+                            #pragma unused (notification)
+                            [weakSelf handleWorkspaceDidWake];
+                        }];
+
+        // Update the icon when NovaLINKDevice's volume changes.
         volumeChangeListener = new NovaLINKVolumeChangeListener(audioDevices.novaLINKDevice, [=] {
             [weakSelf novaLINKDeviceVolumeDidChange];
         });
@@ -124,6 +121,85 @@ static CGFloat const kVolumeIconAdditionalVerticalPadding = 0.075;
         [NSEvent removeMonitor:(id)clickEventHandler];
         clickEventHandler = nil;
     }
+
+    if (workspaceWakeObserver) {
+        id observer = workspaceWakeObserver;
+        [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:observer];
+        workspaceWakeObserver = nil;
+    }
+
+    if (statusBarItem) {
+        [[NSStatusBar systemStatusBar] removeStatusItem:statusBarItem];
+        statusBarItem = nil;
+    }
+}
+
+- (void) createStatusItem {
+    statusBarItem =
+            [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
+    if (@available(macOS 10.12, *)) {
+        statusBarItem.visible = YES;
+    }
+
+    // Assigning statusBarItem.menu and letting AppKit auto-track clicks works at launch, but
+    // after long uptime (and especially after sleep) the extra can stop opening while the
+    // process is otherwise healthy. Drive the menu from the button action instead.
+    if ([NovaLINKStatusBarItem buttonAvailable]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wpartial-availability"
+        statusBarItem.button.target = self;
+        statusBarItem.button.action = @selector(statusBarButtonClicked:);
+        [statusBarItem.button sendActionOn:NSEventMaskLeftMouseUp];
+        statusBarItem.button.accessibilityLabel =
+                [NSRunningApplication currentApplication].localizedName;
+#pragma clang diagnostic pop
+    } else {
+        statusBarItem.menu = companionMenu;
+    }
+}
+
+- (void) handleWorkspaceDidWake {
+    // NSStatusItem click tracking often dies across sleep. Recreate the extra.
+    if (statusBarItem) {
+        [[NSStatusBar systemStatusBar] removeStatusItem:statusBarItem];
+        statusBarItem = nil;
+    }
+    [self createStatusItem];
+    [self applyIconSizes];
+    NovaLINKStatusBarIcon current = _icon;
+    self.icon = current;
+}
+
+- (void) statusBarButtonClicked:(id)sender {
+    #pragma unused (sender)
+
+    BOOL optionDown = ([NSEvent modifierFlags] & NSEventModifierFlagOption) != 0;
+    [debugLoggingMenuItem setMenuShowingExtraOptions:optionDown];
+
+    if (!companionMenu) {
+        return;
+    }
+
+    // popUpStatusItemMenu / assigning .menu both rot after long uptime on recent macOS.
+    // Explicitly pop the menu from the button so a click always produces a menu.
+    if ([NovaLINKStatusBarItem buttonAvailable]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wpartial-availability"
+        NSStatusBarButton* button = statusBarItem.button;
+        [button highlight:YES];
+        NSRect bounds = button.bounds;
+        [companionMenu popUpMenuPositioningItem:nil
+                                    atLocation:NSMakePoint(NSMinX(bounds), NSMinY(bounds) - 2.0)
+                                        inView:button];
+        [button highlight:NO];
+#pragma clang diagnostic pop
+        return;
+    }
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    [statusBarItem popUpStatusItemMenu:companionMenu];
+#pragma clang diagnostic pop
 }
 
 - (void) initIcons {
@@ -259,65 +335,82 @@ static CGFloat const kVolumeIconAdditionalVerticalPadding = 0.075;
 #pragma mark Volume Icon
 
 - (void) novaLINKDeviceVolumeDidChange {
-    if (self.icon == NovaLINKVolumeStatusBarIcon) {
-        [self updateVolumeStatusBarIcon];
+    if (self.icon != NovaLINKVolumeStatusBarIcon) {
+        return;
     }
-}
 
-// Should only be called on the main thread because it calls UI functions.
-- (void) updateVolumeStatusBarIcon {
-    NovaLINKAssert([[NSThread currentThread] isMainThread],
-              "updateVolumeStatusBarIcon called on non-main thread.");
-    NovaLINKAssert((self.icon == NovaLINKVolumeStatusBarIcon), "Volume status bar icon not enabled");
+    // HAL reads stay off the main thread so a slow/stuck device cannot freeze the menu extra.
+    if ([NSThread isMainThread]) {
+        dispatch_async(NovaLINKGetDispatchQueue_PriorityUserInteractive(), ^{
+            [self novaLINKDeviceVolumeDidChange];
+        });
+        return;
+    }
+
+    BOOL hasVolume = NO;
+    BOOL muted = NO;
+    double volume = 0.0;
 
     NovaLINKAudioDevice novaLINKDevice = [audioDevices novaLINKDevice];
-
-    // NovaLINKDevice should never return an error for these calls, so we just swallow any exceptions and
-    // give up.
     NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
         AudioObjectPropertyScope scope = kAudioObjectPropertyScopeOutput;
         AudioObjectPropertyScope element = kAudioObjectPropertyElementMaster;
 
-        BOOL hasVolume = novaLINKDevice.HasVolumeControl(scope, element);
-
-        // Show the button as greyed out if NovaLINKDevice doesn't have a volume control (which means the
-        // output device doesn't have one).
-        if ([NovaLINKStatusBarItem buttonAvailable]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wpartial-availability"
-            statusBarItem.button.appearsDisabled = !hasVolume;
-#pragma clang diagnostic pop
+        hasVolume = novaLINKDevice.HasVolumeControl(scope, element);
+        if (hasVolume && novaLINKDevice.HasMuteControl(scope, element)) {
+            muted = novaLINKDevice.GetMuteControlValue(scope, element);
         }
-
         if (hasVolume) {
-            if (novaLINKDevice.HasMuteControl(scope, element) &&
-                    novaLINKDevice.GetMuteControlValue(scope, element)) {
-                // The device is muted, so use the zero waves icon.
-                [self setImage:volumeIcon0SoundWaves];
-            } else {
-                // Set the icon to reflect the device's volume.
-                double volume = novaLINKDevice.GetVolumeControlScalarValue(scope, element);
-
-                // These values match the macOS volume status bar item, except for the first one. I
-                // don't know why, but at a very low volume macOS will show the zero waves icon even
-                // though the sound is still audible.
-                if (volume == 0.05) {
-                    [self setImage:volumeIcon0SoundWaves];
-                } else if (volume < 0.33) {
-                    [self setImage:volumeIcon1SoundWave];
-                } else if (volume < 0.66) {
-                    [self setImage:volumeIcon2SoundWaves];
-                } else {
-                    [self setImage:volumeIcon3SoundWaves];
-                }
-            }
-        } else {
-            // Always use the full-volume icon when the device has no volume control.
-            [self setImage:volumeIcon3SoundWaves];
+            volume = novaLINKDevice.GetVolumeControlScalarValue(scope, element);
         }
     });
 
-    DebugMsg("NovaLINKStatusBarItem::updateVolumeStatusBarIcon: Set icon to %s",
+    BOOL hasVolumeUI = hasVolume;
+    BOOL mutedUI = muted;
+    double volumeUI = volume;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self applyVolumeStatusBarIconHasVolume:hasVolumeUI muted:mutedUI volume:volumeUI];
+    });
+}
+
+- (void) updateVolumeStatusBarIcon {
+    [self novaLINKDeviceVolumeDidChange];
+}
+
+- (void) applyVolumeStatusBarIconHasVolume:(BOOL)hasVolume
+                                     muted:(BOOL)muted
+                                    volume:(double)volume {
+    NovaLINKAssert([[NSThread currentThread] isMainThread],
+              "applyVolumeStatusBarIconHasVolume called on non-main thread.");
+
+    if (self.icon != NovaLINKVolumeStatusBarIcon) {
+        return;
+    }
+
+    if ([NovaLINKStatusBarItem buttonAvailable]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wpartial-availability"
+        statusBarItem.button.appearsDisabled = !hasVolume;
+#pragma clang diagnostic pop
+    }
+
+    if (hasVolume) {
+        if (muted) {
+            [self setImage:volumeIcon0SoundWaves];
+        } else if (volume == 0.05) {
+            [self setImage:volumeIcon0SoundWaves];
+        } else if (volume < 0.33) {
+            [self setImage:volumeIcon1SoundWave];
+        } else if (volume < 0.66) {
+            [self setImage:volumeIcon2SoundWaves];
+        } else {
+            [self setImage:volumeIcon3SoundWaves];
+        }
+    } else {
+        [self setImage:volumeIcon3SoundWaves];
+    }
+
+    DebugMsg("NovaLINKStatusBarItem::applyVolumeStatusBarIconHasVolume: Set icon to %s",
              statusBarItem.image.name.UTF8String);
 }
 

@@ -49,46 +49,57 @@ const static std::vector<CAPropertyAddress> kVolumeChangeProperties = {
 };
 #pragma clang diagnostic pop
 
+static dispatch_queue_t VolumeListenerQueue()
+{
+    static dispatch_once_t once;
+    static dispatch_queue_t queue;
+    dispatch_once(&once, ^{
+        queue = dispatch_queue_create("life.thenurim.novalink.VolumeChangeListener",
+                                      DISPATCH_QUEUE_SERIAL);
+    });
+    return queue;
+}
+
 NovaLINKVolumeChangeListener::NovaLINKVolumeChangeListener(NovaLINKAudioDevice device,
                                                  std::function<void(void)> handler)
 :
+    mListenerBlock(nullptr),
     mDevice(device)
 {
+    dispatch_queue_t listenerQueue = VolumeListenerQueue();
+
     // Register a listener that will update the slider when the user changes the volume or
     // mutes/unmutes their audio.
     mListenerBlock =
             Block_copy(^(UInt32 inNumberAddresses, const AudioObjectPropertyAddress* inAddresses) {
-                // The docs for AudioObjectPropertyListenerBlock say inAddresses will always contain
-                // at least one property the block is listening to, so there's no need to check it.
                 (void)inNumberAddresses;
                 (void)inAddresses;
 
-                // Call the callback.
-                handler();
+                // Bounce out of the HAL listener before calling the handler. The handler may query
+                // the HAL; doing that synchronously here deadlocks coreaudiod and freezes the
+                // status-item menu.
+                dispatch_async(listenerQueue, ^{
+                    handler();
+                });
             });
 
-    // Register for a number of properties that might indicate that clients need to update. For
-    // example, the mute property changing means UI elements that display the volume will need to be
-    // updated, even though it's not strictly a change in volume.
     for(CAPropertyAddress property : kVolumeChangeProperties)
     {
-        // Instead of swallowing exceptions here, we could try again later, but I doubt it would be
-        // worth the effort. And the documentation doesn't actually explain what could cause this
-        // call to fail.
         NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
-            mDevice.AddPropertyListenerBlock(property, dispatch_get_main_queue(), mListenerBlock);
+            mDevice.AddPropertyListenerBlock(property, listenerQueue, mListenerBlock);
         });
     }
 }
 
 NovaLINKVolumeChangeListener::~NovaLINKVolumeChangeListener()
 {
-    // Deregister and release the listener block.
+    dispatch_queue_t listenerQueue = VolumeListenerQueue();
+
     for(CAPropertyAddress property : kVolumeChangeProperties)
     {
         NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
             mDevice.RemovePropertyListenerBlock(property,
-                                                dispatch_get_main_queue(),
+                                                listenerQueue,
                                                 mListenerBlock);
         });
     }

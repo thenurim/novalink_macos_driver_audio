@@ -41,19 +41,27 @@
 #pragma clang assume_nonnull begin
 
 static NSInteger const kOutputDeviceMenuItemTag = 5;
+static int64_t const kPopulateDebounceNsec = 150 * NSEC_PER_MSEC;
 
 @implementation NovaLINKOutputDeviceMenuSection {
     NSMenu* novaLINKMenu;
     NovaLINKAudioDeviceManager* audioDevices;
     NovaLINKPreferredOutputDevices* preferredDevices;
     NSMutableArray<NSMenuItem*>* outputDeviceMenuItems;
+    // HAL queries and property listeners must not run on the main queue. Doing so freezes the
+    // status-item menu after long uptime (Bluetooth / device-list spam) while System Settings
+    // still works — coreaudiod is fine, AppKit is not.
+    dispatch_queue_t halQueue;
+    uint64_t populateGeneration;
+    BOOL menuIsTracking;
+    NSArray<NSDictionary*>* __nullable pendingItemInfos;
     // Called when a CoreAudio property has changed and we might need to update the menu. For
     // example, when a device is connected or disconnected.
     AudioObjectPropertyListenerBlock refreshNeededListener;
     // The devices we've added refreshNeededListener to. Used to avoid adding it to a device twice
     // for the same property and to remove it from all devices in dealloc.
-    std::set<NovaLINKAudioDevice> listenedDevices_kAudioDevicePropertyDataSources;
-    std::set<NovaLINKAudioDevice> listenedDevices_kAudioDevicePropertyDataSource;
+    std::set<AudioObjectID> listenedDevices_kAudioDevicePropertyDataSources;
+    std::set<AudioObjectID> listenedDevices_kAudioDevicePropertyDataSource;
 }
 
 - (instancetype) initWithNovaLINKMenu:(NSMenu*)inNovaLINKMenu
@@ -64,20 +72,32 @@ static NSInteger const kOutputDeviceMenuItemTag = 5;
         audioDevices = inAudioDevices;
         preferredDevices = inPreferredDevices;
         outputDeviceMenuItems = [NSMutableArray new];
+        populateGeneration = 0;
+        menuIsTracking = NO;
+        pendingItemInfos = nil;
+        halQueue = dispatch_queue_create("life.thenurim.novalink.OutputDeviceMenu",
+                                         DISPATCH_QUEUE_SERIAL);
+
+        NSNotificationCenter* nc = [NSNotificationCenter defaultCenter];
+        [nc addObserver:self
+               selector:@selector(menuDidBeginTracking:)
+                   name:NSMenuDidBeginTrackingNotification
+                 object:novaLINKMenu];
+        [nc addObserver:self
+               selector:@selector(menuDidEndTracking:)
+                   name:NSMenuDidEndTrackingNotification
+                 object:novaLINKMenu];
 
         [self listenForDevicesAddedOrRemoved];
-        // Defer the first HAL device enumeration so launch can finish and System Settings
-        // can open. Enumerating every device synchronously here blocks coreaudiod.
-        NovaLINKOutputDeviceMenuSection* __weak weakSelf = self;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [weakSelf populateNovaLINKMenu];
-        });
+        [self schedulePopulateNovaLINKMenuDebounced:NO];
     }
     
     return self;
 }
 
 - (void) dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+
     // Tell CoreAudio not to call the listener block anymore. This probably isn't necessary.
     //
     // I think it's safe to do this without dispatching to the main queue because dealloc and
@@ -90,7 +110,7 @@ static NSInteger const kOutputDeviceMenuItemTag = 5;
             // Check the object still exists first to reduce unnecessary error logs.
             if (CAHALAudioObject::ObjectExists(audioObject.GetObjectID())) {
                 audioObject.RemovePropertyListenerBlock(CAPropertyAddress(prop),
-                                                        dispatch_get_main_queue(),
+                                                        halQueue,
                                                         refreshNeededListener);
             }
         });
@@ -99,138 +119,216 @@ static NSInteger const kOutputDeviceMenuItemTag = 5;
     // Remove the listener from each audio object we added it to.
     removeListener(CAHALAudioSystemObject(), kAudioHardwarePropertyDevices);
 
-    for (auto device : listenedDevices_kAudioDevicePropertyDataSources) {
-        removeListener(device, kAudioDevicePropertyDataSources);
+    for (auto deviceID : listenedDevices_kAudioDevicePropertyDataSources) {
+        removeListener(NovaLINKAudioDevice(deviceID), kAudioDevicePropertyDataSources);
     }
 
-    for (auto device : listenedDevices_kAudioDevicePropertyDataSource) {
-        removeListener(device, kAudioDevicePropertyDataSource);
+    for (auto deviceID : listenedDevices_kAudioDevicePropertyDataSource) {
+        removeListener(NovaLINKAudioDevice(deviceID), kAudioDevicePropertyDataSource);
     }
 }
 
 - (void) listenForDevicesAddedOrRemoved {
-    // Create the block that will run when a device is added or removed.
     NovaLINKOutputDeviceMenuSection* __weak weakSelf = self;
 
     refreshNeededListener = ^(UInt32 inNumberAddresses,
                               const AudioObjectPropertyAddress* inAddresses) {
         #pragma unused (inNumberAddresses, inAddresses)
-
-        NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
-            [weakSelf populateNovaLINKMenu];
-        });
+        // Return immediately — never call the HAL from inside a property listener.
+        [weakSelf schedulePopulateNovaLINKMenuDebounced:YES];
     };
 
-    // Register the listener block to be called when devices are connected or disconnected.
     NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
         CAHALAudioSystemObject().AddPropertyListenerBlock(
             CAPropertyAddress(kAudioHardwarePropertyDevices),
-            dispatch_get_main_queue(),
+            halQueue,
             refreshNeededListener);
     });
 }
 
-- (void) populateNovaLINKMenu {
-    // TODO: Technically, we should assert we're on the main queue rather than just the main thread.
-    NovaLINKAssert([NSThread isMainThread],
-              "NovaLINKOutputDeviceMenuSection::populateNovaLINKMenu called on non-main thread");
+- (void) schedulePopulateNovaLINKMenuDebounced:(BOOL)debounced {
+    NovaLINKOutputDeviceMenuSection* __weak weakSelf = self;
+    dispatch_async(halQueue, ^{
+        NovaLINKOutputDeviceMenuSection* strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
 
-    // Remove existing menu items
-    for (NSMenuItem* item in outputDeviceMenuItems) {
-        DebugMsg("NovaLINKOutputDeviceMenuSection::populateNovaLINKMenu: Removing %s",
-                 item.description.UTF8String);
-        [novaLINKMenu removeItem:item];
+        strongSelf->populateGeneration++;
+        const uint64_t generation = strongSelf->populateGeneration;
+        const int64_t delay = debounced ? kPopulateDebounceNsec : 0;
+
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delay), strongSelf->halQueue, ^{
+            NovaLINKOutputDeviceMenuSection* innerSelf = weakSelf;
+            if (!innerSelf || generation != innerSelf->populateGeneration) {
+                return;
+            }
+            NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+                [innerSelf collectAndApplyMenuItems];
+            });
+        });
+    });
+}
+
+- (void) menuDidBeginTracking:(NSNotification*)notification {
+    #pragma unused (notification)
+    menuIsTracking = YES;
+}
+
+- (void) menuDidEndTracking:(NSNotification*)notification {
+    #pragma unused (notification)
+    menuIsTracking = NO;
+    if (pendingItemInfos) {
+        NSArray<NSDictionary*>* infos = pendingItemInfos;
+        pendingItemInfos = nil;
+        [self applyMenuItemInfos:infos];
     }
-    
-    [outputDeviceMenuItems removeAllObjects];
-    
-    // Add a menu item for each output device
+}
+
+- (void) collectAndApplyMenuItems {
+    NSMutableArray<NSDictionary*>* itemInfos = [NSMutableArray new];
+    std::set<AudioObjectID> outputDeviceIDs;
+
     CAHALAudioSystemObject audioSystem;
     UInt32 numDevices = audioSystem.GetNumberAudioDevices();
-    
+
     if (numDevices > 0) {
         CAAutoArrayDelete<AudioObjectID> devices(numDevices);
         audioSystem.GetAudioDevices(numDevices, devices);
-        
+
         for (UInt32 i = 0; i < numDevices; i++) {
-            [self insertMenuItemsForDevice:devices[i]];
+            NovaLINKAudioDevice device(devices[i]);
+            BOOL canBeOutputDevice = YES;
+            NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+                canBeOutputDevice = device.CanBeOutputDeviceInNovaLINKApp();
+            });
+
+            if (!canBeOutputDevice) {
+                continue;
+            }
+
+            outputDeviceIDs.insert(device.GetObjectID());
+            [itemInfos addObjectsFromArray:[self itemInfosForDevice:device]];
+            [self listenForDataSourceChangesOnDevice:device];
         }
     }
-}
 
-- (void) insertMenuItemsForDevice:(NovaLINKAudioDevice)device {
-    // Insert menu items after the item for the "Output Device" heading.
-    const NSInteger menuItemsIdx = [novaLINKMenu indexOfItemWithTag:kOutputDeviceMenuItemTag] + 1;
+    [self removeStaleDataSourceListeners:outputDeviceIDs];
 
-    BOOL canBeOutputDevice = YES;
-    NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
-        canBeOutputDevice = device.CanBeOutputDeviceInNovaLINKApp();
+    NSArray<NSDictionary*>* infos = [itemInfos copy];
+    NovaLINKOutputDeviceMenuSection* __weak weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NovaLINKOutputDeviceMenuSection* strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
+        if (strongSelf->menuIsTracking) {
+            strongSelf->pendingItemInfos = infos;
+            return;
+        }
+        [strongSelf applyMenuItemInfos:infos];
     });
+}
 
-    if (canBeOutputDevice) {
-        for (NSMenuItem* item : [self createMenuItemsForDevice:device]) {
-            DebugMsg("NovaLINKOutputDeviceMenuSection::insertMenuItemsForDevice: Inserting %s",
-                     item.description.UTF8String);
-            [novaLINKMenu insertItem:item atIndex:menuItemsIdx];
-            [outputDeviceMenuItems addObject:item];
-        }
+- (void) listenForDataSourceChangesOnDevice:(NovaLINKAudioDevice)device {
+    const AudioObjectID deviceID = device.GetObjectID();
 
-        // Add listeners to update the menu when the device's data source changes or it changes its
-        // list of data sources. We do this so that, for example, when you plug headphones into the
-        // built-in jack, the menu item for the built-in device will change from "Internal Speakers"
-        // to "Headphones".
-        if (listenedDevices_kAudioDevicePropertyDataSources.count(device) == 0) {
-            NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
-                device.AddPropertyListenerBlock(CAPropertyAddress(kAudioDevicePropertyDataSources,
-                                                                  kAudioDevicePropertyScopeOutput),
-                                                dispatch_get_main_queue(),
-                                                refreshNeededListener);
-                listenedDevices_kAudioDevicePropertyDataSources.insert(device);
-            });
-        };
+    if (listenedDevices_kAudioDevicePropertyDataSources.count(deviceID) == 0) {
+        NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+            device.AddPropertyListenerBlock(CAPropertyAddress(kAudioDevicePropertyDataSources,
+                                                              kAudioDevicePropertyScopeOutput),
+                                            halQueue,
+                                            refreshNeededListener);
+            listenedDevices_kAudioDevicePropertyDataSources.insert(deviceID);
+        });
+    }
 
-        if (listenedDevices_kAudioDevicePropertyDataSource.count(device) == 0) {
-            NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
-                device.AddPropertyListenerBlock(CAPropertyAddress(kAudioDevicePropertyDataSource,
-                                                                  kAudioDevicePropertyScopeOutput),
-                                                dispatch_get_main_queue(),
-                                                refreshNeededListener);
-                listenedDevices_kAudioDevicePropertyDataSource.insert(device);
-            });
-        };
+    if (listenedDevices_kAudioDevicePropertyDataSource.count(deviceID) == 0) {
+        NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+            device.AddPropertyListenerBlock(CAPropertyAddress(kAudioDevicePropertyDataSource,
+                                                              kAudioDevicePropertyScopeOutput),
+                                            halQueue,
+                                            refreshNeededListener);
+            listenedDevices_kAudioDevicePropertyDataSource.insert(deviceID);
+        });
     }
 }
 
-- (NSArray<NSMenuItem*>*) createMenuItemsForDevice:(CAHALAudioDevice)device {
-    // We fill this array with a menu item for each output device (or each data source for each device) on
-    // the system.
-    NSMutableArray<NSMenuItem*>* items = [NSMutableArray new];
+- (void) removeStaleDataSourceListeners:(const std::set<AudioObjectID>&)currentOutputDeviceIDs {
+    auto removeIfStale = [&] (std::set<AudioObjectID>& listened,
+                              AudioObjectPropertySelector prop) {
+        for (auto it = listened.begin(); it != listened.end(); ) {
+            if (currentOutputDeviceIDs.count(*it) == 0) {
+                NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+                    if (CAHALAudioObject::ObjectExists(*it)) {
+                        NovaLINKAudioDevice(*it).RemovePropertyListenerBlock(
+                            CAPropertyAddress(prop, kAudioDevicePropertyScopeOutput),
+                            halQueue,
+                            refreshNeededListener);
+                    }
+                });
+                it = listened.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    };
+
+    removeIfStale(listenedDevices_kAudioDevicePropertyDataSources,
+                  kAudioDevicePropertyDataSources);
+    removeIfStale(listenedDevices_kAudioDevicePropertyDataSource,
+                  kAudioDevicePropertyDataSource);
+}
+
+- (void) applyMenuItemInfos:(NSArray<NSDictionary*>*)itemInfos {
+    NovaLINKAssert([NSThread isMainThread],
+              "NovaLINKOutputDeviceMenuSection::applyMenuItemInfos called on non-main thread");
+
+    for (NSMenuItem* item in outputDeviceMenuItems) {
+        DebugMsg("NovaLINKOutputDeviceMenuSection::applyMenuItemInfos: Removing %s",
+                 item.description.UTF8String);
+        [novaLINKMenu removeItem:item];
+    }
+
+    [outputDeviceMenuItems removeAllObjects];
+
+    const NSInteger menuItemsIdx = [novaLINKMenu indexOfItemWithTag:kOutputDeviceMenuItemTag] + 1;
+    for (NSDictionary* info in itemInfos) {
+        NSMenuItem* item = [self menuItemFromInfo:info];
+        DebugMsg("NovaLINKOutputDeviceMenuSection::applyMenuItemInfos: Inserting %s",
+                 item.description.UTF8String);
+        [novaLINKMenu insertItem:item atIndex:menuItemsIdx];
+        [outputDeviceMenuItems addObject:item];
+    }
+}
+
+- (NSArray<NSDictionary*>*) itemInfosForDevice:(CAHALAudioDevice)device {
+    NSMutableArray<NSDictionary*>* items = [NSMutableArray new];
 
     AudioObjectPropertyScope scope = kAudioObjectPropertyScopeOutput;
     UInt32 channel = kAudioObjectPropertyElementMaster;
-    
-    // If the device has data sources, create a menu item for each. Otherwise, create a single menu item
-    // for the device. This way the menu items' titles will be, for example, "Internal Speakers" rather
-    // than "Built-in Output".
-    //
-    // TODO: Handle data destinations as well? I don't have (or know of) any hardware with them.
-    // TODO: Use the current data source's name when the control isn't settable, but only add one menu item.
-    UInt32 numDataSources = 0;
 
+    UInt32 numDataSources = 0;
     NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
         if (device.HasDataSourceControl(scope, channel) &&
                 device.DataSourceControlIsSettable(scope, channel)) {
             numDataSources = device.GetNumberAvailableDataSources(scope, channel);
         }
     });
-    
+
+    BOOL isAirPlay = NO;
+    NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+        isAirPlay = (device.GetTransportType() == kAudioDeviceTransportTypeAirPlay);
+    });
+
     if (numDataSources > 0) {
         CAAutoArrayDelete<UInt32> dataSourceIDs(numDataSources);
-        // This call updates numDataSources to the real number of IDs it added to our array.
-        device.GetAvailableDataSources(scope, channel, numDataSources, dataSourceIDs);
-        
+        NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+            device.GetAvailableDataSources(scope, channel, numDataSources, dataSourceIDs);
+        });
+
         for (UInt32 i = 0; i < numDataSources; i++) {
-            DebugMsg("NovaLINKOutputDeviceMenuSection::createMenuItemsForDevice: "
+            DebugMsg("NovaLINKOutputDeviceMenuSection::itemInfosForDevice: "
                      "Creating item. %s%u %s%u",
                      "Device ID:", device.GetObjectID(),
                      ", Data source ID:", dataSourceIDs[i]);
@@ -239,86 +337,82 @@ static NSInteger const kOutputDeviceMenuItemTag = 5;
                 NSString* dataSourceName =
                     CFBridgingRelease(device.CopyDataSourceNameForID(scope, channel, dataSourceIDs[i]));
                 NSString* deviceName = CFBridgingRelease(device.CopyName());
-                
-                [items addObject:[self createMenuItemForDevice:device
-                                                  dataSourceID:@(dataSourceIDs[i])
-                                                         title:dataSourceName
-                                                       toolTip:deviceName]];
+                [items addObject:[self itemInfoForDeviceID:device.GetObjectID()
+                                              dataSourceID:@(dataSourceIDs[i])
+                                                     title:dataSourceName
+                                                   toolTip:deviceName
+                                                   airPlay:isAirPlay]];
             });
         }
     } else {
-        DebugMsg("NovaLINKOutputDeviceMenuSection::createMenuItemsForDevice: Creating item. %s%u",
+        DebugMsg("NovaLINKOutputDeviceMenuSection::itemInfosForDevice: Creating item. %s%u",
                  "Device ID:", device.GetObjectID());
 
         NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
-            [items addObject:[self createMenuItemForDevice:device
-                                              dataSourceID:nil
-                                                     title:CFBridgingRelease(device.CopyName())
-                                                   toolTip:nil]];
+            [items addObject:[self itemInfoForDeviceID:device.GetObjectID()
+                                          dataSourceID:nil
+                                                 title:CFBridgingRelease(device.CopyName())
+                                               toolTip:nil
+                                               airPlay:isAirPlay]];
         });
     }
-    
+
     return items;
 }
 
-- (NSMenuItem*) createMenuItemForDevice:(CAHALAudioDevice)device
-                           dataSourceID:(NSNumber* __nullable)dataSourceID
-                                  title:(NSString* __nullable)title
-                                toolTip:(NSString* __nullable)toolTip {
-    // If we don't have a title, use the tool-tip text instead.
+- (NSDictionary*) itemInfoForDeviceID:(AudioDeviceID)deviceID
+                         dataSourceID:(NSNumber* __nullable)dataSourceID
+                                title:(NSString* __nullable)title
+                              toolTip:(NSString* __nullable)toolTip
+                              airPlay:(BOOL)airPlay {
     if (!title) {
         title = (toolTip ? toolTip : @"");
     }
-    
+
+    BOOL isSelected =
+        [audioDevices isOutputDevice:deviceID] &&
+            (!dataSourceID || [audioDevices isOutputDataSource:[dataSourceID unsignedIntValue]]);
+
+    return @{
+        @"deviceID": @(deviceID),
+        @"dataSourceID": dataSourceID ? NovaLINKNN(dataSourceID) : [NSNull null],
+        @"title": NovaLINKNN(title),
+        @"toolTip": toolTip ? NovaLINKNN(toolTip) : [NSNull null],
+        @"airPlay": @(airPlay),
+        @"selected": @(isSelected)
+    };
+}
+
+- (NSMenuItem*) menuItemFromInfo:(NSDictionary*)info {
+    NSString* title = info[@"title"];
     NSMenuItem* item = [[NSMenuItem alloc] initWithTitle:NovaLINKNN(title)
                                                   action:@selector(outputDeviceMenuItemSelected:)
                                            keyEquivalent:@""];
-    
-    // Add the AirPlay icon to the labels of AirPlay devices.
-    //
-    // TODO: Test this with real hardware that supports AirPlay. (I don't have any.)
-    NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
-        if (device.GetTransportType() == kAudioDeviceTransportTypeAirPlay) {
-            item.image = [NSImage imageNamed:@"AirPlayIcon"];
-            
-            // Make the icon a "template image" so it gets drawn colour-inverted when it's highlighted or
-            // OS X is in dark mode.
-            [item.image setTemplate:YES];
-        }
-    });
-    
-    // The menu item should be selected if it's the menu item for the current output device. If the device
-    // has data sources, only the menu item for the current data source should be selected.
-    BOOL isSelected =
-        [audioDevices isOutputDevice:device.GetObjectID()] &&
-            (!dataSourceID || [audioDevices isOutputDataSource:[dataSourceID unsignedIntValue]]);
-    
-    item.state = (isSelected ? NSOnState : NSOffState);
-    item.toolTip = toolTip;
+
+    if ([info[@"airPlay"] boolValue]) {
+        item.image = [NSImage imageNamed:@"AirPlayIcon"];
+        [item.image setTemplate:YES];
+    }
+
+    item.state = [info[@"selected"] boolValue] ? NSOnState : NSOffState;
+    id toolTip = info[@"toolTip"];
+    item.toolTip = (toolTip == [NSNull null]) ? nil : toolTip;
     item.target = self;
     item.indentationLevel = 1;
-    item.representedObject = @{ @"deviceID": @(device.GetObjectID()),
-                                @"dataSourceID": dataSourceID ? NovaLINKNN(dataSourceID) : [NSNull null] };
+    item.representedObject = @{ @"deviceID": NovaLINKNN(info[@"deviceID"]),
+                                @"dataSourceID": NovaLINKNN(info[@"dataSourceID"]) };
 
 #if __clang_major__ >= 9
     if (@available(macOS 10.10, *)) {
-        // Used for UI tests.
         item.accessibilityIdentifier = @"output-device";
     }
 #endif
-    
+
     return item;
 }
 
-// Called by NovaLINKAudioDeviceManager to tell us a different device has been set as the output device.
 - (void) outputDeviceDidChange {
-    NovaLINKOutputDeviceMenuSection* __weak weakSelf = self;
-
-    dispatch_async(dispatch_get_main_queue(), ^{
-        NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
-            [weakSelf populateNovaLINKMenu];
-        });
-    });
+    [self schedulePopulateNovaLINKMenuDebounced:NO];
 }
 
 - (void) outputDeviceMenuItemSelected:(NSMenuItem*)menuItem {

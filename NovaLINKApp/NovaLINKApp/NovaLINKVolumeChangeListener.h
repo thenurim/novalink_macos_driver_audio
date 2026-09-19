@@ -41,8 +41,8 @@ class NovaLINKVolumeChangeListener
 public:
     /*!
      * @param device Listens for notifications about this device.
-     * @param handler The function to call when the device's volume (or mute) changes. Called on the
-     *                main queue.
+     * @param handler The function to call when the device's volume (or mute) changes. Called on a
+     *                background queue; hop to the main queue before touching AppKit.
      */
     NovaLINKVolumeChangeListener(NovaLINKAudioDevice device, std::function<void(void)> handler);
     virtual ~NovaLINKVolumeChangeListener();
