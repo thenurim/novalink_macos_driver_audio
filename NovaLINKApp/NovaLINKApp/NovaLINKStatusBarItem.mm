@@ -149,7 +149,7 @@ static CGFloat const kVolumeIconAdditionalVerticalPadding = 0.075;
 #pragma clang diagnostic ignored "-Wpartial-availability"
         statusBarItem.button.target = self;
         statusBarItem.button.action = @selector(statusBarButtonClicked:);
-        [statusBarItem.button sendActionOn:NSEventMaskLeftMouseUp];
+        [statusBarItem.button sendActionOn:NSEventMaskLeftMouseDown];
         statusBarItem.button.accessibilityLabel =
                 [NSRunningApplication currentApplication].localizedName;
 #pragma clang diagnostic pop
@@ -180,22 +180,13 @@ static CGFloat const kVolumeIconAdditionalVerticalPadding = 0.075;
         return;
     }
 
-    // popUpStatusItemMenu / assigning .menu both rot after long uptime on recent macOS.
-    // Explicitly pop the menu from the button so a click always produces a menu.
-    if ([NovaLINKStatusBarItem buttonAvailable]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wpartial-availability"
-        NSStatusBarButton* button = statusBarItem.button;
-        [button highlight:YES];
-        NSRect bounds = button.bounds;
-        [companionMenu popUpMenuPositioningItem:nil
-                                    atLocation:NSMakePoint(NSMinX(bounds), NSMinY(bounds) - 2.0)
-                                        inView:button];
-        [button highlight:NO];
-#pragma clang diagnostic pop
-        return;
-    }
+    // Let the delegate fill in Auto-pause / device checkmarks before the first paint.
+    [companionMenu update];
 
+    // popUpMenuPositioningItem:nil is a contextual popup: recent macOS anchors it on the
+    // checked item, so rows above that (Auto-pause) are clipped by the menu bar until the
+    // mouse moves and AppKit reflows. popUpStatusItemMenu always hangs the full menu
+    // under the extra.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
     [statusBarItem popUpStatusItemMenu:companionMenu];
