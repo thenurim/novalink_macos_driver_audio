@@ -1,0 +1,8 @@
+---
+name: requirements
+description: This is a new rule
+---
+
+
+# Rules
+- 새로운 기능이 추가될때마다 features.md 파일에 테이블 구조로 신규 기능에 대한 ID 및 summary, 적용된 OS, 날짜를 포함하는 feature table을 업데이트해.
