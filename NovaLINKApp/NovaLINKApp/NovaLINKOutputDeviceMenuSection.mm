@@ -42,6 +42,7 @@
 
 static NSInteger const kOutputDeviceMenuItemTag = 5;
 static int64_t const kPopulateDebounceNsec = 150 * NSEC_PER_MSEC;
+static UInt32 const kMaxDataSourcesPerDevice = 32;
 
 @implementation NovaLINKOutputDeviceMenuSection {
     NSMenu* novaLINKMenu;
@@ -198,7 +199,7 @@ static int64_t const kPopulateDebounceNsec = 150 * NSEC_PER_MSEC;
 
         for (UInt32 i = 0; i < numDevices; i++) {
             NovaLINKAudioDevice device(devices[i]);
-            BOOL canBeOutputDevice = YES;
+            BOOL canBeOutputDevice = NO;
             NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
                 canBeOutputDevice = device.CanBeOutputDeviceInNovaLINKApp();
             });
@@ -321,37 +322,55 @@ static int64_t const kPopulateDebounceNsec = 150 * NSEC_PER_MSEC;
         isAirPlay = (device.GetTransportType() == kAudioDeviceTransportTypeAirPlay);
     });
 
+    if (numDataSources > kMaxDataSourcesPerDevice) {
+        numDataSources = kMaxDataSourcesPerDevice;
+    }
+
     if (numDataSources > 0) {
         CAAutoArrayDelete<UInt32> dataSourceIDs(numDataSources);
+        UInt32 fetched = numDataSources;
+        BOOL gotSources = NO;
         NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
-            device.GetAvailableDataSources(scope, channel, numDataSources, dataSourceIDs);
+            device.GetAvailableDataSources(scope, channel, fetched, dataSourceIDs);
+            gotSources = YES;
         });
 
-        for (UInt32 i = 0; i < numDataSources; i++) {
-            DebugMsg("NovaLINKOutputDeviceMenuSection::itemInfosForDevice: "
-                     "Creating item. %s%u %s%u",
-                     "Device ID:", device.GetObjectID(),
-                     ", Data source ID:", dataSourceIDs[i]);
+        if (gotSources && fetched > 0) {
+            for (UInt32 i = 0; i < fetched; i++) {
+                DebugMsg("NovaLINKOutputDeviceMenuSection::itemInfosForDevice: "
+                         "Creating item. %s%u %s%u",
+                         "Device ID:", device.GetObjectID(),
+                         ", Data source ID:", dataSourceIDs[i]);
 
-            NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, "(DS)", [&] {
-                NSString* dataSourceName =
-                    CFBridgingRelease(device.CopyDataSourceNameForID(scope, channel, dataSourceIDs[i]));
-                NSString* deviceName = CFBridgingRelease(device.CopyName());
-                [items addObject:[self itemInfoForDeviceID:device.GetObjectID()
-                                              dataSourceID:@(dataSourceIDs[i])
-                                                     title:dataSourceName
-                                                   toolTip:deviceName
-                                                   airPlay:isAirPlay]];
-            });
+                NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, "(DS)", [&] {
+                    NSString* dataSourceName =
+                        CFBridgingRelease(device.CopyDataSourceNameForID(scope, channel, dataSourceIDs[i]));
+                    NSString* deviceName = CFBridgingRelease(device.CopyName());
+                    if (dataSourceName.length == 0 && deviceName.length == 0) {
+                        return;
+                    }
+                    [items addObject:[self itemInfoForDeviceID:device.GetObjectID()
+                                                  dataSourceID:@(dataSourceIDs[i])
+                                                         title:dataSourceName
+                                                       toolTip:deviceName
+                                                       airPlay:isAirPlay]];
+                });
+            }
         }
-    } else {
+    }
+
+    if (items.count == 0) {
         DebugMsg("NovaLINKOutputDeviceMenuSection::itemInfosForDevice: Creating item. %s%u",
                  "Device ID:", device.GetObjectID());
 
         NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+            NSString* deviceName = CFBridgingRelease(device.CopyName());
+            if (deviceName.length == 0) {
+                return;
+            }
             [items addObject:[self itemInfoForDeviceID:device.GetObjectID()
                                           dataSourceID:nil
-                                                 title:CFBridgingRelease(device.CopyName())
+                                                 title:deviceName
                                                toolTip:nil
                                                airPlay:isAirPlay]];
         });

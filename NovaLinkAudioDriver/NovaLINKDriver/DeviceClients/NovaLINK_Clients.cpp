@@ -62,6 +62,13 @@ void    NovaLINK_Clients::AddClient(NovaLINK_Client inClient)
     {
         DebugMsg("NovaLINK_Clients::AddClient: Adding music player client. mClientID = %u", inClient.mClientID);
     }
+
+    // The HAL registers multiple clients per process. Every App/Helper client must be a
+    // passthrough host so playthrough ReadInput is not treated as Zoom-style capture.
+    inClient.mIsPassthroughHost =
+            inClient.mBundleID.IsValid() &&
+            (inClient.mBundleID == kNovaLINKAppBundleID ||
+             inClient.mBundleID == kNovaLINKXPCHelperBundleID);
     
     mClientMap.AddClient(inClient);
     
@@ -70,10 +77,12 @@ void    NovaLINK_Clients::AddClient(NovaLINK_Client inClient)
     if(inClient.mBundleID.IsValid() && inClient.mBundleID == kNovaLINKAppBundleID)
     {
         mNovaLINKAppClientID = inClient.mClientID;
+        mNovaLINKAppClientCount++;
     }
     else if(inClient.mBundleID.IsValid() && inClient.mBundleID == kNovaLINKXPCHelperBundleID)
     {
         mXPCHelperClientID = inClient.mClientID;
+        mXPCHelperClientCount++;
     }
 }
 
@@ -84,13 +93,35 @@ void    NovaLINK_Clients::RemoveClient(const UInt32 inClientID)
     NovaLINK_Client theRemovedClient = mClientMap.RemoveClient(inClientID);
     
     // If we're removing NovaLINKApp, clear our local copy of its client ID
-    if(theRemovedClient.mClientID == mNovaLINKAppClientID)
+    if(theRemovedClient.mBundleID.IsValid() && theRemovedClient.mBundleID == kNovaLINKAppBundleID)
     {
-        mNovaLINKAppClientID = -1;
+        if(mNovaLINKAppClientCount > 0)
+        {
+            mNovaLINKAppClientCount--;
+        }
+        if(mNovaLINKAppClientCount == 0)
+        {
+            mNovaLINKAppClientID = -1;
+        }
+        else if(theRemovedClient.mClientID == mNovaLINKAppClientID)
+        {
+            mNovaLINKAppClientID = -1;
+        }
     }
-    if(theRemovedClient.mClientID == mXPCHelperClientID)
+    if(theRemovedClient.mBundleID.IsValid() && theRemovedClient.mBundleID == kNovaLINKXPCHelperBundleID)
     {
-        mXPCHelperClientID = -1;
+        if(mXPCHelperClientCount > 0)
+        {
+            mXPCHelperClientCount--;
+        }
+        if(mXPCHelperClientCount == 0)
+        {
+            mXPCHelperClientID = -1;
+        }
+        else if(theRemovedClient.mClientID == mXPCHelperClientID)
+        {
+            mXPCHelperClientID = -1;
+        }
     }
 }
 
@@ -125,7 +156,7 @@ bool    NovaLINK_Clients::StartIONonRT(UInt32 inClientID)
         mStartCount++;
         
         // Update mStartCountExcludingNovaLINKApp (also excludes XPCHelper fallback playthrough)
-        if(!IsPassthroughHost(inClientID))
+        if(!theClient.mIsPassthroughHost)
         {
             ThrowIf(mStartCountExcludingNovaLINKApp == UINT64_MAX, CAException(kAudioHardwareIllegalOperationError), "NovaLINK_Clients::StartIO: failed to start because mStartCountExcludingNovaLINKApp was maxxed out already");
             
@@ -142,9 +173,7 @@ bool    NovaLINK_Clients::StartIONonRT(UInt32 inClientID)
         sendIsRunningNotification = didStartIO;
     }
     
-    // At most App + XPCHelper are excluded as passthrough hosts.
-    Assert(mStartCountExcludingNovaLINKApp <= mStartCount &&
-           (mStartCount - mStartCountExcludingNovaLINKApp) <= 2,
+    Assert(mStartCountExcludingNovaLINKApp <= mStartCount,
            "mStartCount and mStartCountExcludingNovaLINKApp are out of sync");
     
     SendIORunningNotifications(sendIsRunningNotification,
@@ -185,7 +214,7 @@ bool    NovaLINK_Clients::StopIONonRT(UInt32 inClientID)
         mStartCount--;
         
         // Update mStartCountExcludingNovaLINKApp (also excludes XPCHelper fallback playthrough)
-        if(!IsPassthroughHost(inClientID))
+        if(!theClient.mIsPassthroughHost)
         {
             ThrowIf(mStartCountExcludingNovaLINKApp <= 0, CAException(kAudioHardwareIllegalOperationError), "NovaLINK_Clients::StopIO: Underflowed mStartCountExcludingNovaLINKApp");
             
@@ -214,8 +243,7 @@ bool    NovaLINK_Clients::StopIONonRT(UInt32 inClientID)
         sendIsRunningNotification = didStopIO;
     }
     
-    Assert(mStartCountExcludingNovaLINKApp <= mStartCount &&
-           (mStartCount - mStartCountExcludingNovaLINKApp) <= 2,
+    Assert(mStartCountExcludingNovaLINKApp <= mStartCount,
            "mStartCount and mStartCountExcludingNovaLINKApp are out of sync");
     Assert(mInputStartCountExcludingPassthrough <= mStartCountExcludingNovaLINKApp,
            "mInputStartCountExcludingPassthrough and mStartCountExcludingNovaLINKApp are out of sync");
@@ -237,7 +265,7 @@ void    NovaLINK_Clients::StartInputIONonRT(UInt32 inClientID)
             NovaLINK_InvalidClientException(),
             "NovaLINK_Clients::StartInputIO: Cannot mark input IO for client that was never added");
 
-    if(!theClient.mDoingIO || theClient.mDoingInputIO || IsPassthroughHost(inClientID))
+    if(!theClient.mDoingIO || theClient.mDoingInputIO || theClient.mIsPassthroughHost)
     {
         return;
     }
@@ -275,18 +303,38 @@ bool    NovaLINK_Clients::ClientsOtherThanPassthroughHostReadingInput() const
 
 bool    NovaLINK_Clients::ClientShouldMarkInputIORT(UInt32 inClientID) const
 {
-    if(IsPassthroughHost(inClientID))
-    {
-        return false;
-    }
-
     NovaLINK_Client theClient;
     if(!mClientMap.GetClientRT(inClientID, &theClient))
     {
         return false;
     }
 
+    if(theClient.mIsPassthroughHost)
+    {
+        return false;
+    }
+
     return theClient.mDoingIO && !theClient.mDoingInputIO;
+}
+
+bool    NovaLINK_Clients::IsPassthroughHostRT(UInt32 inClientID) const
+{
+    NovaLINK_Client theClient;
+    if(!mClientMap.GetClientRT(inClientID, &theClient))
+    {
+        return false;
+    }
+    return theClient.mIsPassthroughHost;
+}
+
+bool    NovaLINK_Clients::IsPassthroughHostNonRT(UInt32 inClientID) const
+{
+    NovaLINK_Client theClient;
+    if(!mClientMap.GetClientNonRT(inClientID, &theClient))
+    {
+        return false;
+    }
+    return theClient.mIsPassthroughHost;
 }
 
 void    NovaLINK_Clients::SendIORunningNotifications(bool sendIsRunningNotification,

@@ -41,6 +41,11 @@
 NSString* const kAudioSystemSettingsPlist =
     @"/Library/Preferences/Audio/com.apple.audio.SystemSettings.plist";
 
+// Bluetooth A2DP↔HFP and reconnects look like remove+add. Switching output in that window
+// StartIOProc's a device the HAL is already tearing down and wedges coreaudiod — System
+// Settings Sound then spins forever.
+static int64_t const kDeviceListDebounceNsec = 750 * NSEC_PER_MSEC;
+
 @implementation NovaLINKPreferredOutputDevices {
     NSRecursiveLock* _stateLock;
 
@@ -56,6 +61,11 @@ NSString* const kAudioSystemSettingsPlist =
 
     // Called when a device is connected or disconnected.
     AudioObjectPropertyListenerBlock _deviceListListener;
+
+    // HAL queries must not run inside a property listener. Serial + debounce coalesces
+    // Bluetooth device-list spam.
+    dispatch_queue_t _halQueue;
+    uint64_t _deviceListGeneration;
 }
 
 - (instancetype) initWithDevices:(NovaLINKAudioDeviceManager*)devices
@@ -65,6 +75,9 @@ NSString* const kAudioSystemSettingsPlist =
         _devices = devices;
         _userDefaults = userDefaults;
         _preferredDeviceUIDs = [self readPreferredDevices];
+        _deviceListGeneration = 0;
+        _halQueue = dispatch_queue_create("life.thenurim.novalink.PreferredOutputDevices",
+                                          DISPATCH_QUEUE_SERIAL);
 
         DebugMsg("NovaLINKPreferredOutputDevices::initWithDevices: Preferred devices: %s",
                  _preferredDeviceUIDs.debugDescription.UTF8String);
@@ -82,7 +95,7 @@ NSString* const kAudioSystemSettingsPlist =
         // Tell CoreAudio not to call the listener block anymore.
         CAHALAudioSystemObject().RemovePropertyListenerBlock(
             CAPropertyAddress(kAudioHardwarePropertyDevices),
-            dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0),
+            _halQueue,
             _deviceListListener);
     } @finally {
         [_stateLock unlock];
@@ -235,23 +248,43 @@ NSString* const kAudioSystemSettingsPlist =
 }
 
 - (void) listenForDevicesAddedOrRemoved {
-    // Create the block that will run when a device is added or removed.
     NovaLINKPreferredOutputDevices* __weak weakSelf = self;
 
     _deviceListListener = ^(UInt32 inNumberAddresses,
                             const AudioObjectPropertyAddress* inAddresses) {
         #pragma unused (inNumberAddresses, inAddresses)
-
-        NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
-            [weakSelf connectedDeviceListChanged];
-        });
+        // Return immediately — never call the HAL from inside a property listener.
+        [weakSelf scheduleConnectedDeviceListChanged];
     };
 
-    // Register the listener block with CoreAudio.
     CAHALAudioSystemObject().AddPropertyListenerBlock(
         CAPropertyAddress(kAudioHardwarePropertyDevices),
-        dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0),
+        _halQueue,
         _deviceListListener);
+}
+
+- (void) scheduleConnectedDeviceListChanged {
+    NovaLINKPreferredOutputDevices* __weak weakSelf = self;
+    dispatch_async(_halQueue, ^{
+        NovaLINKPreferredOutputDevices* strongSelf = weakSelf;
+        if (!strongSelf) {
+            return;
+        }
+
+        strongSelf->_deviceListGeneration++;
+        const uint64_t generation = strongSelf->_deviceListGeneration;
+
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, kDeviceListDebounceNsec),
+                       strongSelf->_halQueue, ^{
+            NovaLINKPreferredOutputDevices* innerSelf = weakSelf;
+            if (!innerSelf || generation != innerSelf->_deviceListGeneration) {
+                return;
+            }
+            NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {
+                [innerSelf connectedDeviceListChanged];
+            });
+        });
+    });
 }
 
 - (void) connectedDeviceListChanged {

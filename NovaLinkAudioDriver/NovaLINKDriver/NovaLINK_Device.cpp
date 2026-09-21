@@ -1251,7 +1251,7 @@ void	NovaLINK_Device::StartIO(UInt32 inClientID)
                                "NovaLINK_Device::StartIO: Failed to start because of an error calling down to the driver.");
         }
         
-        clientIsPassthroughHost = mClients.IsPassthroughHost(inClientID);
+        clientIsPassthroughHost = mClients.IsPassthroughHostNonRT(inClientID);
         novaLINKAppHasClientRegistered = mClients.NovaLINKAppHasClientRegistered();
     }
     
@@ -1436,7 +1436,7 @@ void	NovaLINK_Device::DoIOOperation(AudioObjectID inStreamObjectID, UInt32 inCli
                 //
                 // Passthrough hosts (App / XPCHelper) get desktop loopback only so speakers do not
                 // play the injected mic. Other clients (Zoom, OBS, …) get desktop + mic.
-                const bool mixMic = SupportsMicMix() && !mClients.IsPassthroughHost(inClientID);
+                const bool mixMic = SupportsMicMix() && !mClients.IsPassthroughHostRT(inClientID);
                 ReadInputData(inIOBufferFrameSize,
                               inIOCycleInfo.mInputTime.mSampleTime,
                               ioMainBuffer,
@@ -1968,13 +1968,17 @@ void	NovaLINK_Device::RemoveClient(const AudioServerPlugInClientInfo* inClientIn
     
     CAMutex::Locker theStateLocker(mStateMutex);
 
-    // If we're removing NovaLINKApp, reenable all of NovaLINKDevice's controls.
-    if(mClients.IsNovaLINKApp(inClientInfo->mClientID))
+    const bool isAppClient =
+            (inClientInfo->mBundleID != nullptr) &&
+            (CFStringCompare(inClientInfo->mBundleID, CFSTR(kNovaLINKAppBundleID), 0) == kCFCompareEqualTo);
+
+    mClients.RemoveClient(inClientInfo->mClientID);
+
+    // Re-enable controls only after the last companion HAL client is gone.
+    if(isAppClient && !mClients.NovaLINKAppHasClientRegistered())
     {
         RequestEnabledControls(true, true);
     }
-
-    mClients.RemoveClient(inClientInfo->mClientID);
 }
 
 void	NovaLINK_Device::PerformConfigChange(UInt64 inChangeAction, void* inChangeInfo)

@@ -72,6 +72,11 @@ public:
     
     // True if NovaLINKApp has set this client as belonging to the music player app
     bool                          mIsMusicPlayer = false;
+
+    // True if this HAL client belongs to the companion app or XPCHelper. The HAL often
+    // registers several clients per process; playthrough IO must be recognized on every
+    // one of them so injected mic is not mixed into speakers.
+    bool                          mIsPassthroughHost = false;
     
 };
 

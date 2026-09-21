@@ -116,6 +116,35 @@ static const AudioServerPlugInClientInfo client2Info = {
     XCTAssertEqual(clients->GetMusicPlayerProcessIDProperty(), client1Info.mProcessID);
 }
 
+- (void)testMultipleAppClientsArePassthroughHosts {
+    const AudioServerPlugInClientInfo appClient1 = {
+        31, 3100, true, CFSTR(kNovaLINKAppBundleID)
+    };
+    const AudioServerPlugInClientInfo appClient2 = {
+        32, 3100, true, CFSTR(kNovaLINKAppBundleID)
+    };
+    const AudioServerPlugInClientInfo otherClient = {
+        99, 9900, true, CFSTR("com.example.zoom")
+    };
+
+    clients->AddClient(&appClient1);
+    clients->AddClient(&appClient2);
+    clients->AddClient(&otherClient);
+
+    XCTAssertTrue(clients->IsPassthroughHostNonRT(appClient1.mClientID));
+    XCTAssertTrue(clients->IsPassthroughHostNonRT(appClient2.mClientID));
+    XCTAssertFalse(clients->IsPassthroughHostNonRT(otherClient.mClientID));
+    XCTAssertTrue(clients->NovaLINKAppHasClientRegistered());
+
+    clients->RemoveClient(appClient1.mClientID);
+    XCTAssertTrue(clients->IsPassthroughHostNonRT(appClient2.mClientID));
+    XCTAssertTrue(clients->NovaLINKAppHasClientRegistered());
+    XCTAssertFalse(clients->ClientsOtherThanPassthroughHostReadingInput());
+
+    clients->RemoveClient(appClient2.mClientID);
+    XCTAssertFalse(clients->NovaLINKAppHasClientRegistered());
+}
+
 - (void)testSetMusicPlayerInvalidPID {
     NovaLINKShouldThrow<NovaLINK_InvalidClientPIDException>(self, [=](){
         clients->SetMusicPlayer(-1);

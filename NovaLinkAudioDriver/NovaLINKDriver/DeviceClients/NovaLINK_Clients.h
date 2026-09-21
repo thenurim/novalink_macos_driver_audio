@@ -86,12 +86,12 @@ private:
                                                                    bool sendIsRunningSomewhereOtherThanNovaLINKAppNotification,
                                                                    bool sendInputRunningSomewhereOtherThanPassthroughHostNotification) const;
 public:
-    bool                                IsNovaLINKApp(UInt32 inClientID) const { return inClientID == mNovaLINKAppClientID; }
     bool                                IsXPCHelper(UInt32 inClientID) const { return inClientID == mXPCHelperClientID; }
     // App or XPCHelper — either can host playthrough and should not trigger nested StartIO playthrough requests.
-    bool                                IsPassthroughHost(UInt32 inClientID) const
-                                            { return IsNovaLINKApp(inClientID) || IsXPCHelper(inClientID); }
-    bool                                NovaLINKAppHasClientRegistered() const { return mNovaLINKAppClientID != -1; }
+    // Matches every HAL client from those processes, not a single stored client ID.
+    bool                                IsPassthroughHostRT(UInt32 inClientID) const;
+    bool                                IsPassthroughHostNonRT(UInt32 inClientID) const;
+    bool                                NovaLINKAppHasClientRegistered() const { return mNovaLINKAppClientCount > 0; }
     
     inline pid_t                        GetMusicPlayerProcessIDProperty() const { return mMusicPlayerProcessIDProperty; }
     inline CFStringRef                  CopyMusicPlayerBundleIDProperty() const { return mMusicPlayerBundleIDProperty.CopyCFString(); }
@@ -122,6 +122,8 @@ private:
     
     SInt64                              mNovaLINKAppClientID = -1;
     SInt64                              mXPCHelperClientID = -1;
+    UInt32                              mNovaLINKAppClientCount = 0;
+    UInt32                              mXPCHelperClientCount = 0;
     
     // The value of the kAudioDeviceCustomPropertyMusicPlayerProcessID property, or 0 if it's unset/null.
     // We store this separately because the music player might not always be a client, but could be added

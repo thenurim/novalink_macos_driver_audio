@@ -483,7 +483,10 @@ static OSStatus MicInputIOProc(AudioObjectID,
         if (!strongSelf) {
             return;
         }
-        [strongSelf syncToCaptureDemand];
+        // Return immediately — StartIOProc from inside a HAL listener wedges coreaudiod.
+        dispatch_async(strongSelf->_demandQueue, ^{
+            [strongSelf syncToCaptureDemand];
+        });
     };
 
     NovaLINK_Utils::LogAndSwallowExceptions(NovaLINKDbgArgs, [&] {

@@ -48,5 +48,6 @@ void    NovaLINK_Client::Copy(const NovaLINK_Client& inClient)
     mDoingIO = inClient.mDoingIO;
     mDoingInputIO = inClient.mDoingInputIO;
     mIsMusicPlayer = inClient.mIsMusicPlayer;
+    mIsPassthroughHost = inClient.mIsPassthroughHost;
 }
 
